@@ -1,0 +1,877 @@
+// Consultant & Mentorship Platform — Prisma schema
+// Postgres. Run: npx prisma generate && npx prisma migrate dev && npx prisma db seed
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CONSULTANT
+  CLIENT
+}
+
+enum PackageType {
+  ONE_TIME
+  MONTHLY
+  ANNUAL
+  CUSTOM
+}
+
+// Communication channel a plan unlocks. COMBINED unlocks text + audio + video.
+enum PackageChannel {
+  TEXT
+  AUDIO
+  VIDEO
+  COMBINED
+}
+
+enum PurchaseStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PENDING
+}
+
+enum MessageType {
+  TEXT
+  AUDIO
+  VIDEO
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum MeetingStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentKind {
+  ONE_TIME
+  SUBSCRIPTION
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum OtpPurpose {
+  REGISTER
+  LOGIN
+  RESET
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  role      Role     @default(CLIENT)
+  isActive  Boolean  @default(true)
+  avatarUrl String?
+
+  // consultant-only profile fields
+  bio        String?
+  expertise  String?
+  title      String?
+
+  // Expo push token for mobile notifications (null when not registered)
+  pushToken  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // relations
+  clientConversations     Conversation[] @relation("ClientConversations")
+  consultantConversations Conversation[] @relation("ConsultantConversations")
+  sentMessages            Message[]      @relation("SentMessages")
+  clientPurchases         Purchase[]     @relation("ClientPurchases")
+  consultantPurchases     Purchase[]     @relation("ConsultantPurchases")
+  availability            Availability[]
+  clientMeetings          Meeting[]      @relation("ClientMeetings")
+  consultantMeetings      Meeting[]      @relation("ConsultantMeetings")
+  payments                Payment[]
+  notifications           Notification[]
+  communityMemberships    CommunityMember[]
+  communityPosts          CommunityPost[]
+  communityComments       CommunityComment[]
+  communityPostLikes      CommunityPostLike[]
+  activityLogs            ActivityLog[]
+
+  // Learning / library relations (Phase 1: books)
+  entitlements          Entitlement[]
+  readingProgress       ReadingProgress[]
+  bookmarks             Bookmark[]
+  highlights            Highlight[]
+  readerNotes           ReaderNote[]
+  offlineContents       OfflineContent[]
+  orders                Order[]
+  subscriptions         Subscription[]
+  hardCopyOrders        HardCopyOrder[]
+
+  // Future course system relations (scaffolded)
+  enrollments           Enrollment[]
+  quizAttempts          QuizAttempt[]
+  assignmentSubmissions AssignmentSubmission[]
+  certificates          Certificate[]
+
+  // Plans explicitly assigned to this consultant (many-to-many). Global plans
+  // (Package.isGlobal = true) are available to every consultant and are not
+  // listed here.
+  packages                Package[]      @relation("PackageConsultants")
+}
+
+model Package {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  type        PackageType    @default(ONE_TIME)
+  channel     PackageChannel @default(COMBINED)
+  price       Float          @default(0)
+  currency    String         @default("PKR")
+  isActive    Boolean        @default(true)
+
+  // When true the plan is offered by every consultant. When false it is only
+  // offered by the consultants in the `consultants` relation below.
+  isGlobal    Boolean        @default(false)
+
+  // configurable limits (null = unlimited / not applicable)
+  textLimit         Int? // number of text messages allowed
+  audioLimit        Int? // number of audio messages allowed
+  videoLimit        Int? // number of video messages allowed
+  sessionLimit      Int? // number of live meeting sessions
+  sessionDuration   Int? // minutes per meeting session
+  audioDuration     Int? // max seconds per audio message
+  videoDuration     Int? // max seconds per video message
+  responseAllowance Int? // consultant responses included
+
+  // billing period in days for recurring packages (e.g. 30, 365). null for one-time
+  billingDays Int?
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  purchases Purchase[]
+
+  // Consultants this plan is assigned to (ignored when isGlobal = true).
+  consultants User[]   @relation("PackageConsultants")
+}
+
+model Purchase {
+  id           String         @id @default(cuid())
+  clientId     String
+  consultantId String?
+  packageId    String
+  status       PurchaseStatus @default(PENDING)
+  autoRenew    Boolean        @default(false)
+
+  // snapshot of limits at purchase time
+  textLimit       Int?
+  audioLimit      Int?
+  videoLimit      Int?
+  sessionLimit    Int?
+  sessionDuration Int?
+  audioDuration   Int?
+  videoDuration   Int?
+
+  // usage counters
+  textUsed     Int @default(0)
+  audioUsed    Int @default(0)
+  videoUsed    Int @default(0)
+  sessionsUsed Int @default(0)
+
+  startedAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  client     User    @relation("ClientPurchases", fields: [clientId], references: [id])
+  consultant User?   @relation("ConsultantPurchases", fields: [consultantId], references: [id])
+  package    Package @relation(fields: [packageId], references: [id])
+  messages   Message[]
+  meetings   Meeting[]
+  payments   Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Conversation {
+  id           String   @id @default(cuid())
+  clientId     String
+  consultantId String
+  lastMessageAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  client     User      @relation("ClientConversations", fields: [clientId], references: [id])
+  consultant User      @relation("ConsultantConversations", fields: [consultantId], references: [id])
+  messages   Message[]
+
+  @@unique([clientId, consultantId])
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversationId String
+  senderId       String
+  purchaseId     String?
+  type           MessageType   @default(TEXT)
+  body           String?
+  mediaUrl       String?
+  durationSec    Int?
+  status         MessageStatus @default(SENT)
+  createdAt      DateTime      @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id])
+  purchase     Purchase?    @relation(fields: [purchaseId], references: [id])
+}
+
+model Availability {
+  id           String  @id @default(cuid())
+  consultantId String
+  weekday      Int // 0=Sunday .. 6=Saturday
+  startTime    String // "09:00"
+  endTime      String // "17:00"
+  isActive     Boolean @default(true)
+
+  consultant User @relation(fields: [consultantId], references: [id])
+}
+
+model Meeting {
+  id           String        @id @default(cuid())
+  clientId     String
+  consultantId String
+  purchaseId   String?
+  title        String
+  scheduledAt  DateTime
+  durationMin  Int           @default(30)
+  status       MeetingStatus @default(REQUESTED)
+  meetingUrl   String?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  client     User      @relation("ClientMeetings", fields: [clientId], references: [id])
+  consultant User      @relation("ConsultantMeetings", fields: [consultantId], references: [id])
+  purchase   Purchase? @relation(fields: [purchaseId], references: [id])
+}
+
+model Payment {
+  id         String        @id @default(cuid())
+  userId     String
+  purchaseId String?
+  amount     Float
+  currency   String        @default("PKR")
+  gateway    String        @default("mock")
+  kind       PaymentKind   @default(ONE_TIME)
+  status     PaymentStatus @default(PENDING)
+  reference  String?
+  invoiceNo  String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  // Commerce order this payment settles (books, bundles, subscriptions). The
+  // legacy consultation flow uses `purchaseId` instead; exactly one is set.
+  orderId    String?
+
+  user     User      @relation(fields: [userId], references: [id])
+  purchase Purchase? @relation(fields: [purchaseId], references: [id])
+  order    Order?    @relation(fields: [orderId], references: [id])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  channel   NotificationChannel @default(IN_APP)
+  type      String
+  title     String
+  body      String?
+  read      Boolean             @default(false)
+  createdAt DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Community {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isPaid      Boolean  @default(false)
+  price       Float    @default(0)
+  currency    String   @default("PKR")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  members CommunityMember[]
+  posts   CommunityPost[]
+}
+
+model CommunityMember {
+  id          String   @id @default(cuid())
+  communityId String
+  userId      String
+  isModerator Boolean  @default(false)
+  joinedAt    DateTime @default(now())
+
+  community Community @relation(fields: [communityId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([communityId, userId])
+}
+
+model CommunityPost {
+  id          String   @id @default(cuid())
+  communityId String
+  authorId    String
+  body        String
+  mediaUrl    String?
+  createdAt   DateTime @default(now())
+
+  community Community          @relation(fields: [communityId], references: [id])
+  author    User               @relation(fields: [authorId], references: [id])
+  comments  CommunityComment[]
+  likes     CommunityPostLike[]
+  isAnnouncement Boolean        @default(false)
+}
+
+model CommunityComment {
+  id        String   @id @default(cuid())
+  postId    String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  post   CommunityPost @relation(fields: [postId], references: [id])
+  author User          @relation(fields: [authorId], references: [id])
+}
+
+model OtpCode {
+  id        String     @id @default(cuid())
+  email     String
+  code      String
+  purpose   OtpPurpose @default(LOGIN)
+  expiresAt DateTime
+  used      Boolean    @default(false)
+  createdAt DateTime   @default(now())
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  meta      String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+model PlatformSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String?
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
+// LEARNING PLATFORM — Phase 1 (Books / Library / Subscriptions / Orders)
+// Future-ready scaffolding for Courses, Lessons, Quizzes, Assignments below.
+// ============================================================================
+
+enum LearningProductKind {
+  BOOK
+  BUNDLE
+  SUBSCRIPTION
+}
+
+// How a piece of content is accessed once owned.
+enum AccessType {
+  LIFETIME // one-time purchase, never expires
+  SUBSCRIPTION // available only while a subscription is active
+}
+
+enum EntitlementSource {
+  PURCHASE
+  BUNDLE
+  SUBSCRIPTION
+  ADMIN_GRANT
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum SubscriptionInterval {
+  MONTHLY
+  SIX_MONTHS
+  YEARLY
+  LIFETIME
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum HardCopyOrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum LessonType {
+  VIDEO
+  PDF
+  TEXT
+  QUIZ
+  ASSIGNMENT
+}
+
+model BookCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  icon      String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  books Book[]
+}
+
+model Book {
+  id          String  @id @default(cuid())
+  title       String
+  slug        String  @unique
+  author      String  @default("Prof. Dr. Javed Iqbal")
+  description String?
+  coverUrl    String?
+  language    String  @default("en")
+  pageCount   Int?
+  categoryId  String?
+
+  // Pricing. Digital price is the in-app price; hardCopyPrice is for physical orders.
+  price         Float   @default(0)
+  currency      String  @default("PKR")
+  hardCopyPrice Float?
+  allowHardCopy Boolean @default(false)
+
+  // LIFETIME = unlocked by a one-time purchase; SUBSCRIPTION = unlocked by an
+  // active subscription. Admin-configurable per book.
+  accessType AccessType @default(LIFETIME)
+
+  isFeatured  Boolean @default(false)
+  isPublished Boolean @default(true)
+
+  // Encrypted content references. `contentKey` points to the protected (server
+  // side) source used to issue a per-user encrypted copy. `previewContentKey`
+  // is a short, freely viewable sample. Raw files are never exposed directly.
+  contentKey        String?
+  previewContentKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category        BookCategory?     @relation(fields: [categoryId], references: [id])
+  chapters        Chapter[]
+  bundleItems     BundleItem[]
+  entitlements    Entitlement[]
+  offlineContents OfflineContent[]
+  readingProgress ReadingProgress[]
+  bookmarks       Bookmark[]
+  highlights      Highlight[]
+  readerNotes     ReaderNote[]
+  orders          Order[]
+  hardCopyOrders  HardCopyOrder[]
+}
+
+model Chapter {
+  id         String  @id @default(cuid())
+  bookId     String
+  index      Int
+  title      String
+  // Encrypted/protected content reference for this chapter.
+  contentKey String?
+  pageStart  Int?
+  pageEnd    Int?
+
+  book      Book      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  bookmarks Bookmark[]
+  highlights Highlight[]
+  readerNotes ReaderNote[]
+
+  @@unique([bookId, index])
+}
+
+model Bundle {
+  id          String  @id @default(cuid())
+  title       String
+  slug        String  @unique
+  description String?
+  coverUrl    String?
+  price       Float   @default(0)
+  currency    String  @default("PKR")
+  isFeatured  Boolean @default(false)
+  isPublished Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items  BundleItem[]
+  orders Order[]
+}
+
+model BundleItem {
+  id       String @id @default(cuid())
+  bundleId String
+  bookId   String
+
+  bundle Bundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  book   Book   @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([bundleId, bookId])
+}
+
+// A commerce order for a digital product (book, bundle or subscription plan).
+// Settled by one or more Payment rows; on success it is fulfilled into
+// Entitlement / Subscription records.
+model Order {
+  id       String              @id @default(cuid())
+  userId   String
+  kind     LearningProductKind
+  status   OrderStatus         @default(PENDING)
+  amount   Float
+  currency String              @default("PKR")
+
+  bookId   String?
+  bundleId String?
+  planId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id])
+  book     Book?            @relation(fields: [bookId], references: [id])
+  bundle   Bundle?          @relation(fields: [bundleId], references: [id])
+  plan     SubscriptionPlan? @relation(fields: [planId], references: [id])
+  payments Payment[]
+}
+
+// "My Books": a user's access grant to a single book. expiresAt is null for
+// lifetime access; set for subscription-derived access.
+model Entitlement {
+  id        String            @id @default(cuid())
+  userId    String
+  bookId    String
+  source    EntitlementSource @default(PURCHASE)
+  isActive  Boolean           @default(true)
+  grantedAt DateTime          @default(now())
+  expiresAt DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+  book Book @relation(fields: [bookId], references: [id])
+
+  @@unique([userId, bookId])
+}
+
+// Tracks a securely downloaded, encrypted offline copy on a user's device. The
+// raw content never leaves app storage; we persist only metadata + a wrapped
+// key reference so the same copy can be re-issued / revoked.
+model OfflineContent {
+  id           String   @id @default(cuid())
+  userId       String
+  bookId       String
+  // Opaque reference to the per-user wrapped content key (KMS/keystore handle).
+  wrappedKeyRef String?
+  version      Int      @default(1)
+  sizeBytes    Int?
+  downloadedAt DateTime @default(now())
+  lastSyncedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  book Book @relation(fields: [bookId], references: [id])
+
+  @@unique([userId, bookId])
+}
+
+model ReadingProgress {
+  id                String   @id @default(cuid())
+  userId            String
+  bookId            String
+  lastChapterIndex  Int      @default(0)
+  lastPage          Int      @default(0)
+  percentComplete   Float    @default(0)
+  chaptersCompleted Int      @default(0)
+  readingSeconds    Int      @default(0)
+  isCompleted       Boolean  @default(false)
+  lastReadAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  book Book @relation(fields: [bookId], references: [id])
+
+  @@unique([userId, bookId])
+}
+
+model Bookmark {
+  id         String   @id @default(cuid())
+  userId     String
+  bookId     String
+  chapterId  String?
+  page       Int
+  label      String?
+  createdAt  DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id])
+  book    Book     @relation(fields: [bookId], references: [id])
+  chapter Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model Highlight {
+  id        String   @id @default(cuid())
+  userId    String
+  bookId    String
+  chapterId String?
+  page      Int
+  text      String
+  color     String   @default("#FF7A1A")
+  position  String? // JSON-encoded selection range
+  createdAt DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id])
+  book    Book     @relation(fields: [bookId], references: [id])
+  chapter Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model ReaderNote {
+  id        String   @id @default(cuid())
+  userId    String
+  bookId    String
+  chapterId String?
+  page      Int
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id])
+  book    Book     @relation(fields: [bookId], references: [id])
+  chapter Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model SubscriptionPlan {
+  id          String               @id @default(cuid())
+  name        String
+  description String?
+  interval    SubscriptionInterval @default(MONTHLY)
+  // Access duration in days. Null = lifetime (admin-configurable).
+  durationDays Int?
+  price       Float                @default(0)
+  currency    String               @default("PKR")
+  isActive    Boolean              @default(true)
+  features    String? // JSON-encoded list of feature strings
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  subscriptions Subscription[]
+  orders        Order[]
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  userId    String
+  planId    String
+  status    SubscriptionStatus @default(PENDING)
+  autoRenew Boolean            @default(false)
+  startedAt DateTime           @default(now())
+  expiresAt DateTime? // null = lifetime
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  user User             @relation(fields: [userId], references: [id])
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+}
+
+model HardCopyOrder {
+  id        String              @id @default(cuid())
+  userId    String
+  bookId    String?
+  name      String
+  phone     String
+  address   String
+  city      String
+  quantity  Int                 @default(1)
+  status    HardCopyOrderStatus @default(PENDING)
+  notes     String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user User  @relation(fields: [userId], references: [id])
+  book Book? @relation(fields: [bookId], references: [id])
+}
+
+model CommunityPostLike {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id])
+
+  @@unique([postId, userId])
+}
+
+// ============================================================================
+// FUTURE COURSE SYSTEM (scaffolded — not wired into controllers yet)
+// ============================================================================
+
+model Course {
+  id          String  @id @default(cuid())
+  title       String
+  slug        String  @unique
+  description String?
+  coverUrl    String?
+  price       Float   @default(0)
+  currency    String  @default("PKR")
+  isPublished Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lessons     Lesson[]
+  enrollments Enrollment[]
+  quizzes     Quiz[]
+  assignments Assignment[]
+  certificates Certificate[]
+}
+
+model Lesson {
+  id         String     @id @default(cuid())
+  courseId   String
+  index      Int
+  title      String
+  type       LessonType @default(VIDEO)
+  // Protected/encrypted streaming or document reference. Never a direct download URL.
+  contentKey String?
+  durationSec Int?
+  isPreview  Boolean    @default(false)
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  quiz   Quiz?
+
+  @@unique([courseId, index])
+}
+
+model Enrollment {
+  id              String   @id @default(cuid())
+  userId          String
+  courseId        String
+  percentComplete Float    @default(0)
+  lessonsComplete Int      @default(0)
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+}
+
+model Quiz {
+  id       String @id @default(cuid())
+  courseId String
+  lessonId String? @unique
+  title    String
+  passScore Int    @default(70)
+
+  course    Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lesson    Lesson?        @relation(fields: [lessonId], references: [id])
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+}
+
+model QuizQuestion {
+  id      String @id @default(cuid())
+  quizId  String
+  index   Int
+  prompt  String
+  // JSON-encoded options + correct answer index.
+  options String
+  answer  Int
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([quizId, index])
+}
+
+model QuizAttempt {
+  id        String   @id @default(cuid())
+  quizId    String
+  userId    String
+  score     Int      @default(0)
+  passed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Assignment {
+  id          String   @id @default(cuid())
+  courseId    String
+  title       String
+  description String?
+  dueAt       DateTime?
+
+  course      Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  submissions AssignmentSubmission[]
+}
+
+model AssignmentSubmission {
+  id           String   @id @default(cuid())
+  assignmentId String
+  userId       String
+  contentKey   String?
+  grade        Int?
+  feedback     String?
+  submittedAt  DateTime @default(now())
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([assignmentId, userId])
+}
+
+model Certificate {
+  id        String   @id @default(cuid())
+  userId    String
+  courseId  String
+  serial    String   @unique
+  issuedAt  DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id])
+}

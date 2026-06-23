@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "Prof. Dr. Javed Iqbal",
+    "slug": "javed-iqbal-learning",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#FF7A1A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#FF7A1A",
+          "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Allow $(PRODUCT_NAME) to access your Face ID biometric data."
+        }
+      ]
+    ],
+    "notification": {
+      "iosDisplayInForeground": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.javediqbal.learning"
+    },
+    "android": {
+      "package": "com.javediqbal.learning",
+      "adaptiveIcon": {
+        "backgroundColor": "#FF7A1A"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "extra": {
+      "apiUrl": "http://10.0.2.2:4000/api",
+      "eas": {
+        "projectId": "431ff4dd-dc8b-43af-8544-511099762aaa"
+      }
+    }
+  }
+}

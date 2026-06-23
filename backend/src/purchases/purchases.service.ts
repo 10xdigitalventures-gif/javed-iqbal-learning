@@ -1,0 +1,145 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { PaymentKind, PurchaseStatus } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreatePurchaseDto } from "./dto";
+
+@Injectable()
+export class PurchasesService {
+  constructor(private prisma: PrismaService) {}
+
+  // Create a PENDING purchase + PENDING payment. Activation happens after the
+  // payment webhook confirms (or immediately in mock mode via markPaid).
+  async create(clientId: string, dto: CreatePurchaseDto) {
+    const pkg = await this.prisma.package.findUnique({
+      where: { id: dto.packageId },
+      include: { consultants: { select: { id: true } } },
+    });
+    if (!pkg) throw new NotFoundException("Package not found");
+    if (!pkg.isActive) throw new BadRequestException("This plan is no longer available");
+
+    // Validate the plan is purchasable for the chosen consultant: a global plan
+    // works with anyone, otherwise the consultant must be explicitly assigned.
+    if (!pkg.isGlobal) {
+      if (!dto.consultantId)
+        throw new BadRequestException(
+          "Select a consultant for this plan before purchasing",
+        );
+      const assigned = pkg.consultants.some((c) => c.id === dto.consultantId);
+      if (!assigned)
+        throw new ForbiddenException(
+          "This plan is not offered by the selected consultant",
+        );
+    }
+
+    const expiresAt = pkg.billingDays
+      ? new Date(Date.now() + pkg.billingDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    const purchase = await this.prisma.purchase.create({
+      data: {
+        clientId,
+        consultantId: dto.consultantId ?? null,
+        packageId: pkg.id,
+        status: PurchaseStatus.PENDING,
+        autoRenew: pkg.type === "MONTHLY" || pkg.type === "ANNUAL",
+        textLimit: pkg.textLimit,
+        audioLimit: pkg.audioLimit,
+        videoLimit: pkg.videoLimit,
+        sessionLimit: pkg.sessionLimit,
+        sessionDuration: pkg.sessionDuration,
+        audioDuration: pkg.audioDuration,
+        videoDuration: pkg.videoDuration,
+        expiresAt,
+      },
+    });
+
+    const payment = await this.prisma.payment.create({
+      data: {
+        userId: clientId,
+        purchaseId: purchase.id,
+        amount: pkg.price,
+        currency: pkg.currency,
+        gateway: this.defaultGateway(),
+        kind:
+          pkg.type === "ONE_TIME"
+            ? PaymentKind.ONE_TIME
+            : PaymentKind.SUBSCRIPTION,
+        status: "PENDING",
+        invoiceNo: this.invoiceNo(),
+      },
+    });
+
+    return { purchase, payment };
+  }
+
+  // Activate a purchase once its payment is confirmed.
+  async activate(purchaseId: string) {
+    return this.prisma.purchase.update({
+      where: { id: purchaseId },
+      data: { status: PurchaseStatus.ACTIVE },
+    });
+  }
+
+  listForClient(clientId: string) {
+    return this.prisma.purchase.findMany({
+      where: { clientId },
+      include: { package: true, consultant: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  listForConsultant(consultantId: string) {
+    return this.prisma.purchase.findMany({
+      where: { consultantId },
+      include: { package: true, client: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  listAll() {
+    return this.prisma.purchase.findMany({
+      include: {
+        package: true,
+        client: { select: { id: true, name: true, email: true } },
+        consultant: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async get(id: string) {
+    const p = await this.prisma.purchase.findUnique({
+      where: { id },
+      include: { package: true },
+    });
+    if (!p) throw new NotFoundException("Purchase not found");
+    return p;
+  }
+
+  async cancel(id: string) {
+    await this.get(id);
+    return this.prisma.purchase.update({
+      where: { id },
+      data: { status: PurchaseStatus.CANCELLED, autoRenew: false },
+    });
+  }
+
+  private invoiceNo() {
+    return "INV-" + Date.now().toString(36).toUpperCase();
+  }
+
+  // Initial gateway before the client picks one at checkout. Uses the first
+  // configured provider (PAYMENT_PROVIDERS) or falls back to the dev mock.
+  private defaultGateway() {
+    const first = (process.env.PAYMENT_PROVIDERS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)[0];
+    return first || "mock";
+  }
+}
