@@ -4,8 +4,23 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { Card, Spinner, Badge, Button, ErrorText } from "@/components/ui";
-import { ChevronLeft, FileText, PlayCircle, HelpCircle, ClipboardList, Lock } from "lucide-react";
+import {
+  Card,
+  Spinner,
+  Badge,
+  Button,
+  Select,
+  ErrorText,
+} from "@/components/ui";
+import { GatewayLabel } from "@/components/gateway-label";
+import {
+  ChevronLeft,
+  FileText,
+  PlayCircle,
+  HelpCircle,
+  ClipboardList,
+  Lock,
+} from "lucide-react";
 
 type Lesson = {
   id: string;
@@ -24,6 +39,7 @@ type Course = {
   price: number;
   currency: string;
   lessons: Lesson[];
+  hasAccess?: boolean;
   isEnrolled?: boolean;
   enrollment?: { percentComplete?: number } | null;
 };
@@ -42,19 +58,44 @@ export default function CourseDetailPage() {
   const [course, setCourse] = useState<Course | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [gateways, setGateways] = useState<string[]>([]);
+  const [gateway, setGateway] = useState<string>("");
 
   const load = useCallback(() => {
-    api<Course>(`/courses/${id}`).then(setCourse).catch((e) => setError(e.message));
+    api<Course>(`/courses/${id}`)
+      .then(setCourse)
+      .catch((e) => setError(e.message));
   }, [id]);
 
   useEffect(() => {
     load();
+    api<{ providers: string[] }>("/payments/providers")
+      .then((r) => {
+        setGateways(r.providers || []);
+        setGateway((r.providers || [])[0] || "");
+      })
+      .catch(() => setGateways([]));
   }, [load]);
 
+  // Free course -> enroll directly. Paid course -> create an order + pending
+  // payment and redirect to the hosted checkout (same flow as books & packages).
   async function enroll() {
+    if (!course) return;
     setBusy(true);
     setError(null);
     try {
+      if (course.price > 0) {
+        const res = await api<{ order: any; payment: any }>("/orders", {
+          method: "POST",
+          body: { kind: "COURSE", courseId: id },
+        });
+        const checkout = await api<{ url: string }>(
+          `/payments/checkout/${res.payment.id}`,
+          { method: "POST", body: gateway ? { gateway } : {} },
+        );
+        window.location.href = checkout.url;
+        return;
+      }
       await api(`/courses/${id}/enroll`, { method: "POST" });
       load();
     } catch (e: any) {
@@ -66,7 +107,7 @@ export default function CourseDetailPage() {
 
   if (!course) return <Spinner />;
 
-  const enrolled = course.isEnrolled;
+  const enrolled = course.hasAccess || course.isEnrolled;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -99,13 +140,29 @@ export default function CourseDetailPage() {
               {enrolled ? (
                 <Badge color="green">You are enrolled</Badge>
               ) : (
-                <Button onClick={enroll} disabled={busy}>
-                  {busy
-                    ? "Enrolling…"
-                    : course.price > 0
-                      ? `Enroll — ${course.currency} ${course.price.toLocaleString()}`
-                      : "Enroll for free"}
-                </Button>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  {course.price > 0 && gateways.length > 1 ? (
+                    <Select
+                      value={gateway}
+                      onChange={(e) => setGateway(e.target.value)}
+                    >
+                      {gateways.map((g) => (
+                        <option key={g} value={g}>
+                          {GatewayLabel(g)}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null}
+                  <Button onClick={enroll} disabled={busy}>
+                    {busy
+                      ? course.price > 0
+                        ? "Starting checkout…"
+                        : "Enrolling…"
+                      : course.price > 0
+                        ? `Enroll — ${course.currency} ${course.price.toLocaleString()}`
+                        : "Enroll for free"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>

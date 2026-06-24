@@ -10,6 +10,9 @@ const DEFAULTS: Record<string, string> = {
   audioMaxSeconds: "90",
   videoMaxSeconds: "120",
   brandColor: "#FF7A1A",
+  // In-app branding logo shown inside the apps: "picture" (Prof. Dr. Javed
+  // Iqbal photo) or "icon" (app monogram). Admin-switchable, global.
+  brandingMode: "picture",
 };
 
 // Sensitive, environment-style configuration the admin can manage from the

@@ -13,7 +13,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#FF7A1A"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       "expo-font",
       [
@@ -28,6 +30,19 @@
         {
           "faceIDPermission": "Allow $(PRODUCT_NAME) to access your Face ID biometric data."
         }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Prof. Dr. Javed Iqbal to access your microphone to record voice messages."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Prof. Dr. Javed Iqbal to use the camera to record video messages.",
+          "microphonePermission": "Allow Prof. Dr. Javed Iqbal to record audio for video messages."
+        }
       ]
     ],
     "notification": {
@@ -35,7 +50,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.javediqbal.learning"
+      "bundleIdentifier": "com.javediqbal.learning",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Allow Prof. Dr. Javed Iqbal to access your microphone to record voice messages.",
+        "NSCameraUsageDescription": "Allow Prof. Dr. Javed Iqbal to use the camera to record video messages.",
+        "NSPhotoLibraryUsageDescription": "Allow Prof. Dr. Javed Iqbal to attach media from your library."
+      }
     },
     "android": {
       "package": "com.javediqbal.learning",
@@ -47,7 +67,8 @@
         "android.permission.INTERNET",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA"
       ]
     },
     "web": {

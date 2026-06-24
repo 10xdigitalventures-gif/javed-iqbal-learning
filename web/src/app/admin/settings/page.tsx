@@ -72,7 +72,31 @@ export default function AdminSettings() {
       />
       <Card>
         <form onSubmit={save} className="grid grid-cols-2 gap-4">
-          {Object.keys(values).map((key) => (
+          <div className="col-span-2">
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              App branding
+            </label>
+            <select
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              value={values.brandingMode || "picture"}
+              onChange={(e) =>
+                setValues({ ...values, brandingMode: e.target.value })
+              }
+            >
+              <option value="picture">
+                Picture — Prof. Dr. Javed Iqbal photo
+              </option>
+              <option value="icon">Icon — app monogram</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Switches the logo shown inside the apps (applies live, no rebuild).
+              The phone launcher icon &amp; splash screen use the photo baked
+              into the latest app build.
+            </p>
+          </div>
+          {Object.keys(values)
+            .filter((key) => key !== "brandingMode")
+            .map((key) => (
             <Input
               key={key}
               label={key}

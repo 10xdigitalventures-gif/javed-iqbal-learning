@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
 import {
+  Image,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -11,6 +12,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
+import { brandingSource } from "../branding";
 import {
   BookCover,
   EmptyState,
@@ -29,6 +31,7 @@ export default function HomeScreen() {
   const [bundles, setBundles] = useState<any[]>([]);
   const [cont, setCont] = useState<any[]>([]);
   const [sub, setSub] = useState<any>(null);
+  const [brandMode, setBrandMode] = useState<string>("picture");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -37,12 +40,14 @@ export default function HomeScreen() {
       api("/books/bundles").catch(() => []),
       api("/library/continue").catch(() => []),
       api("/subscriptions/me").catch(() => null),
+      api("/settings").catch(() => null),
     ])
-      .then(([b, bn, c, s]) => {
+      .then(([b, bn, c, s, settings]: any[]) => {
         setBooks(arr(b));
         setBundles(arr(bn));
         setCont(arr(c));
         setSub(s);
+        if (settings?.brandingMode) setBrandMode(settings.brandingMode);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -61,6 +66,10 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={s.wrap} contentContainerStyle={s.content}>
+      <View style={s.brandRow}>
+        <Image source={brandingSource(brandMode)} style={s.brandLogo} />
+        <Text style={s.brandName}>Prof. Dr. Javed Iqbal</Text>
+      </View>
       <Text style={s.hello}>Assalam-o-Alaikum,</Text>
       <Text style={s.name}>{user?.name || "Reader"}</Text>
       <Text style={s.tagline}>
@@ -215,6 +224,16 @@ export default function HomeScreen() {
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, paddingBottom: 32 },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 },
+  brandLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  brandName: { fontSize: 15, fontWeight: "700", color: colors.text },
   flex1: { flex: 1 },
   hello: { fontSize: 14, color: colors.muted },
   name: { fontSize: 24, fontWeight: "800", color: colors.text, marginTop: 2 },

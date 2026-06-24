@@ -401,6 +401,7 @@ enum LearningProductKind {
   BOOK
   BUNDLE
   SUBSCRIPTION
+  COURSE
 }
 
 // How a piece of content is accessed once owned.
@@ -570,6 +571,7 @@ model Order {
   bookId   String?
   bundleId String?
   planId   String?
+  courseId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -578,6 +580,7 @@ model Order {
   book     Book?            @relation(fields: [bookId], references: [id])
   bundle   Bundle?          @relation(fields: [bundleId], references: [id])
   plan     SubscriptionPlan? @relation(fields: [planId], references: [id])
+  course   Course?          @relation(fields: [courseId], references: [id])
   payments Payment[]
 }
 
@@ -766,6 +769,7 @@ model Course {
   quizzes     Quiz[]
   assignments Assignment[]
   certificates Certificate[]
+  orders      Order[]
 }
 
 model Lesson {

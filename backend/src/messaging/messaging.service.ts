@@ -13,6 +13,9 @@ import { StorageService } from "../media/storage.service";
 import { AuthUser, assertParticipant } from "../common/access";
 import { SendMessageDto } from "./dto";
 
+// App-wide hard cap on text message length (clients also enforce this in the UI).
+const TEXT_CHAR_LIMIT = 2000;
+
 @Injectable()
 export class MessagingService {
   constructor(
@@ -57,14 +60,20 @@ export class MessagingService {
         : user.role === Role.CLIENT
           ? { clientId: user.userId }
           : {};
-    return this.prisma.conversation.findMany({
+    const convos = await this.prisma.conversation.findMany({
       where,
       include: {
         client: { select: { id: true, name: true, avatarUrl: true } },
         consultant: { select: { id: true, name: true, avatarUrl: true } },
+        messages: { orderBy: { createdAt: "desc" }, take: 1 },
       },
       orderBy: { lastMessageAt: "desc" },
     });
+    // Attach a signed last-message preview for the conversation list.
+    return convos.map((c) => ({
+      ...c,
+      messages: c.messages.map((m) => this.withSignedMedia(m)),
+    }));
   }
 
   async getConversation(user: AuthUser, conversationId: string) {
@@ -127,6 +136,15 @@ export class MessagingService {
 
     if (dto.type === MessageType.TEXT && !dto.body?.trim()) {
       throw new BadRequestException("Text message body is required");
+    }
+    if (
+      dto.type === MessageType.TEXT &&
+      dto.body &&
+      dto.body.length > TEXT_CHAR_LIMIT
+    ) {
+      throw new BadRequestException(
+        "Text message exceeds the " + TEXT_CHAR_LIMIT + "-character limit.",
+      );
     }
     // Persist the stable object key (never the transient signed URL). Prefer
     // mediaKey; fall back to normalising a full mediaUrl for older clients.

@@ -18,4 +18,8 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   planId?: string;
+
+  @IsOptional()
+  @IsString()
+  courseId?: string;
 }

@@ -3,7 +3,7 @@ import { Alert, ScrollView, Text, TouchableOpacity, View, StyleSheet } from "rea
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { api } from "../api";
-import { Button, Loading } from "../components";
+import { Button, GatewayModal, Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
 import { ProgressBar } from "../ui";
 import { trackEvent } from "../activity";
@@ -24,6 +24,8 @@ export default function CourseDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [course, setCourse] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [gwVisible, setGwVisible] = useState(false);
+  const [providers, setProviders] = useState<string[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -49,14 +51,61 @@ export default function CourseDetailScreen() {
   const progress = course.enrollment?.percentComplete || 0;
 
   async function enroll() {
+    // Free course -> enroll directly. Paid course -> start the checkout flow.
+    if (!course.price || course.price <= 0) {
+      try {
+        setBusy(true);
+        await api("/courses/" + course.id + "/enroll", { method: "POST" });
+        Alert.alert("Enrolled!", "You can now access all lessons.");
+        const d = await api("/courses/" + course.id);
+        setCourse(d);
+      } catch (e: any) {
+        Alert.alert("Enrollment failed", e?.message);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       setBusy(true);
-      await api("/courses/" + course.id + "/enroll", { method: "POST" });
-      Alert.alert("Enrolled!", "You can now access all lessons.");
-      const d = await api("/courses/" + course.id);
-      setCourse(d);
+      const res = await api("/payments/providers").catch(() => ({
+        providers: [],
+      }));
+      const list: string[] = (res?.providers || []).filter(Boolean);
+      if (list.length > 1) {
+        setProviders(list);
+        setGwVisible(true);
+        setBusy(false);
+        return;
+      }
+      await proceed(list[0]);
     } catch (e: any) {
-      Alert.alert("Enrollment failed", e?.message);
+      Alert.alert("Checkout", e?.message || "Could not start checkout.");
+      setBusy(false);
+    }
+  }
+
+  // Create the order + payment, record the chosen gateway, and open the hosted
+  // checkout in the in-app WebView.
+  async function proceed(gateway?: string) {
+    try {
+      setBusy(true);
+      setGwVisible(false);
+      const order = await api("/orders", {
+        method: "POST",
+        body: { kind: "COURSE", courseId: course.id },
+      });
+      const pay = await api("/payments/checkout/" + order.payment.id, {
+        method: "POST",
+        body: gateway ? { gateway } : {},
+      });
+      nav.navigate("Checkout", {
+        url: pay.url,
+        paymentId: order.payment.id,
+        title: course.title,
+      });
+    } catch (e: any) {
+      Alert.alert("Checkout", e?.message || "Could not start checkout.");
     } finally {
       setBusy(false);
     }
@@ -98,7 +147,13 @@ export default function CourseDetailScreen() {
 
       {!hasAccess && (
         <Button
-          title={busy ? "Please wait..." : "Enroll Now"}
+          title={
+            busy
+              ? "Please wait..."
+              : course.price > 0
+                ? "Enroll - Rs " + course.price
+                : "Enroll for free"
+          }
           onPress={enroll}
           disabled={busy}
         />
@@ -210,6 +265,13 @@ export default function CourseDetailScreen() {
           ))}
         </>
       )}
+      <GatewayModal
+        visible={gwVisible}
+        providers={providers}
+        busy={busy}
+        onPick={proceed}
+        onClose={() => setGwVisible(false)}
+      />
     </ScrollView>
   );
 }

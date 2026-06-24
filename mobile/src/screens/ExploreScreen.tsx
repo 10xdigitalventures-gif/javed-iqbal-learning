@@ -119,17 +119,17 @@ export default function ExploreScreen() {
   return (
     <View style={s.wrap}>
       {/* Category bar */}
-      <ScrollView
+      <FlatList
         horizontal
         showsHorizontalScrollIndicator={false}
+        data={CATEGORIES}
+        keyExtractor={(c) => c.key}
         style={s.catBar}
         contentContainerStyle={s.catBarContent}
-      >
-        {CATEGORIES.map((c) => {
+        renderItem={({ item: c }) => {
           const active = c.kind === "browse" && c.key === cat;
           return (
             <TouchableOpacity
-              key={c.key}
               style={[s.catChip, active ? s.catChipActive : null]}
               activeOpacity={0.85}
               onPress={() => onCategory(c)}
@@ -145,8 +145,8 @@ export default function ExploreScreen() {
               </Text>
             </TouchableOpacity>
           );
-        })}
-      </ScrollView>
+        }}
+      />
 
       {/* Single / Bundle sub-categories */}
       <View style={s.subTabs}>
@@ -174,26 +174,21 @@ export default function ExploreScreen() {
             />
           </View>
           {cats.length ? (
-            <ScrollView
+            <FlatList
               horizontal
               showsHorizontalScrollIndicator={false}
+              data={[{ id: null, name: "All" }, ...cats]}
+              keyExtractor={(c: any) => c.id ?? "all"}
               style={s.filterBar}
               contentContainerStyle={s.filterContent}
-            >
-              <Pill
-                label="All"
-                active={!catFilter}
-                onPress={() => setCatFilter(null)}
-              />
-              {cats.map((c: any) => (
+              renderItem={({ item: c }: { item: any }) => (
                 <Pill
-                  key={c.id}
                   label={c.name}
-                  active={catFilter === c.id}
+                  active={c.id ? catFilter === c.id : !catFilter}
                   onPress={() => setCatFilter(c.id)}
                 />
-              ))}
-            </ScrollView>
+              )}
+            />
           ) : null}
           <FlatList
             data={filteredBooks}
@@ -257,7 +252,7 @@ export default function ExploreScreen() {
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   flex1: { flex: 1 },
-  catBar: { maxHeight: 56, marginTop: 8 },
+  catBar: { marginTop: 8, flexGrow: 0 },
   catBarContent: { paddingHorizontal: spacing.lg, paddingVertical: 8 },
   catChip: {
     flexDirection: "row",
@@ -285,7 +280,7 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     color: colors.text,
   },
-  filterBar: { maxHeight: 48, marginTop: 4 },
+  filterBar: { marginTop: 4, flexGrow: 0 },
   filterContent: { paddingHorizontal: spacing.lg, paddingVertical: 8 },
   listContent: { padding: spacing.lg, paddingBottom: 32 },
   col: { justifyContent: "space-between" },

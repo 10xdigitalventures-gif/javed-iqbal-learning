@@ -66,6 +66,22 @@ export class OrdersService {
       currency = plan.currency;
       itemName = plan.name;
       data.planId = plan.id;
+    } else if (dto.kind === LearningProductKind.COURSE) {
+      if (!dto.courseId) throw new BadRequestException("courseId is required");
+      const course = await this.prisma.course.findUnique({
+        where: { id: dto.courseId },
+      });
+      if (!course || !course.isPublished)
+        throw new NotFoundException("Course not available");
+      const existing = await this.prisma.enrollment.findUnique({
+        where: { userId_courseId: { userId, courseId: course.id } },
+      });
+      if (existing)
+        throw new BadRequestException("You are already enrolled in this course");
+      amount = course.price;
+      currency = course.currency;
+      itemName = course.title;
+      data.courseId = course.id;
     } else {
       throw new BadRequestException("Unsupported order kind");
     }
@@ -124,6 +140,14 @@ export class OrdersService {
       order.planId
     ) {
       await this.grantSubscription(order.userId, order.planId);
+    } else if (order.kind === LearningProductKind.COURSE && order.courseId) {
+      await this.prisma.enrollment.upsert({
+        where: {
+          userId_courseId: { userId: order.userId, courseId: order.courseId },
+        },
+        create: { userId: order.userId, courseId: order.courseId },
+        update: {},
+      });
     }
 
     return this.prisma.order.update({
