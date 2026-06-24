@@ -10,9 +10,7 @@
     "splash": {
       "backgroundColor": "#FF7A1A"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "plugins": [
       "expo-font",
       [
@@ -49,7 +47,7 @@
       ]
     },
     "extra": {
-      "apiUrl": "http://10.0.2.2:4000/api",
+      "apiUrl": "https://consulthub.10xdigitalventures.com/api",
       "eas": {
         "projectId": "431ff4dd-dc8b-43af-8544-511099762aaa"
       }

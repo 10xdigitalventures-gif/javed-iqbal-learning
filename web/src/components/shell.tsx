@@ -1,13 +1,16 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import clsx from "clsx";
 import {
   Bell,
+  BookOpen,
   CalendarClock,
   CreditCard,
+  GraduationCap,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -27,6 +30,8 @@ const nav = {
     { href: "/admin/packages", label: "Packages", icon: Package },
     { href: "/admin/payments", label: "Payments", icon: CreditCard },
     { href: "/admin/communities", label: "Communities", icon: MessageSquare },
+    { href: "/admin/ebooks", label: "E-Books", icon: BookOpen },
+    { href: "/admin/courses", label: "Courses", icon: GraduationCap },
     { href: "/admin/settings", label: "Settings", icon: Settings },
   ],
   CONSULTANT: [

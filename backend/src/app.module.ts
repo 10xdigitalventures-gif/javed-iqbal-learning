@@ -18,10 +18,13 @@ import { MeetingsModule } from "./meetings/meetings.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { CommunitiesModule } from "./communities/communities.module";
+import { CoursesModule } from "./courses/courses.module";
 import { ReportsModule } from "./reports/reports.module";
 import { SettingsModule } from "./settings/settings.module";
 import { MediaModule } from "./media/media.module";
 import { MailModule } from "./mail/mail.module";
+import { StorageModule } from "./storage/storage.module";
+import { AppController } from "./app.controller";
 
 @Module({
   imports: [
@@ -49,10 +52,13 @@ import { MailModule } from "./mail/mail.module";
     PaymentsModule,
     NotificationsModule,
     CommunitiesModule,
+    CoursesModule,
     ReportsModule,
     SettingsModule,
     MediaModule,
+    StorageModule,
   ],
+  controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

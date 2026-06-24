@@ -10,13 +10,9 @@ import { api } from "./api";
 const QUEUE_KEY = "activity_queue_v1";
 
 export type ActivityEvent = {
-  type: string;
-  bookId?: string;
-  chapterIndex?: number;
-  percent?: number;
-  seconds?: number;
+  action: string;
   meta?: Record<string, any>;
-  at: string;
+  at: number;
 };
 
 async function readQueue(): Promise<ActivityEvent[]> {
@@ -29,13 +25,13 @@ async function writeQueue(events: ActivityEvent[]): Promise<void> {
 }
 
 export async function trackEvent(
-  type: string,
-  payload: Partial<ActivityEvent> = {},
+  action: string,
+  payload: Record<string, any> = {},
 ): Promise<void> {
   const event: ActivityEvent = {
-    type,
-    at: new Date().toISOString(),
-    ...payload,
+    action,
+    at: Date.now(),
+    meta: payload,
   };
   try {
     await api("/activity", { method: "POST", body: event });

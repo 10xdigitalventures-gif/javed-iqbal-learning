@@ -22,9 +22,14 @@ import {
 // useless to anyone else. The mobile app stores this ciphertext inside private
 // app storage and decrypts it in memory while reading — it is never written to
 // the device file manager, and is not exportable or shareable.
+import { StorageService } from "../storage/storage.service";
+
 @Injectable()
 export class LibraryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private storage: StorageService,
+  ) {}
 
   // ---- Access control ----
   // A book is accessible if the user holds an active (non-expired) entitlement,
@@ -314,5 +319,40 @@ export class LibraryService {
       "decrypted only inside the app. Replace resolveProtectedSource() with a " +
       "stream from your secure object storage keyed by contentKey."
     );
+  }
+
+  // ---- Secure PDF & Video Storage Handling ----
+  // Returns a temporary signed URL via the scalable storage abstraction.
+  // Fulfills requirement: "No public PDF URLs, Use signed URLs, Protected access"
+  async getSecureMediaUrl(userId: string, bookId: string, chapterId?: string) {
+    await this.assertAccess(userId, bookId);
+    const book = await this.prisma.book.findUnique({
+      where: { id: bookId },
+      include: { chapters: { orderBy: { index: "asc" } } },
+    });
+    if (!book) throw new NotFoundException("Book not found");
+
+    const chapter = chapterId
+      ? book.chapters.find((c) => c.id === chapterId)
+      : book.chapters[0];
+
+    const contentKey = chapter?.contentKey || book.contentKey;
+    if (!contentKey) throw new NotFoundException("No media content available");
+
+    // Retrieve secure signed URL from storage abstraction layer (valid for 1 hour)
+    const signedUrl = await this.storage.getSignedUrl(contentKey, 3600);
+    
+    // Auto-detect based on file extension
+    const mimeType = contentKey.endsWith('.pdf') ? 'application/pdf' 
+                   : contentKey.endsWith('.mp4') ? 'video/mp4' 
+                   : 'application/octet-stream';
+
+    return {
+      bookId,
+      chapterId: chapter?.id ?? null,
+      url: signedUrl,
+      mimeType,
+      expiresIn: 3600,
+    };
   }
 }

@@ -55,6 +55,16 @@ export class LibraryController {
     return this.service.getSecureContent(user.userId, bookId, chapterId);
   }
 
+  // Returns a secure signed URL to a PDF or Video from the Storage Layer.
+  @Get("media/:bookId")
+  getSecureMediaUrl(
+    @CurrentUser() user: AuthUser,
+    @Param("bookId") bookId: string,
+    @Query("chapterId") chapterId?: string,
+  ) {
+    return this.service.getSecureMediaUrl(user.userId, bookId, chapterId);
+  }
+
   @Post("offline/:bookId")
   registerOffline(
     @CurrentUser() user: AuthUser,

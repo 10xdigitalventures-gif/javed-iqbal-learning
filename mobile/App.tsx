@@ -23,6 +23,11 @@ import HardCopyOrderScreen from "./src/screens/HardCopyOrderScreen";
 import ChatScreen from "./src/screens/ChatScreen";
 import LoginScreen from "./src/screens/LoginScreen";
 
+import CoursesScreen from "./src/screens/CoursesScreen";
+import CourseDetailScreen from "./src/screens/CourseDetailScreen";
+import LessonDetailScreen from "./src/screens/LessonDetailScreen";
+import QuizDetailScreen from "./src/screens/QuizDetailScreen";
+
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
@@ -72,6 +77,19 @@ function Tabs() {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Library" component={LibraryScreen} />
       <Tab.Screen name="My Learning" component={MyLearningScreen} />
+      <Tab.Screen
+        name="Courses"
+        component={CoursesScreen as any}
+        options={{
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? "school" : "school-outline"}
+              size={size}
+              color={color}
+            />
+          ),
+        }}
+      />
       <Tab.Screen name="Community" component={CommunityScreen} />
       <Tab.Screen name="Messages" component={MessagesScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
@@ -119,6 +137,21 @@ function Root() {
             options={hardCopyOpts}
           />
           <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen
+            name="CourseDetail"
+            component={CourseDetailScreen as any}
+            options={brandHeader}
+          />
+          <Stack.Screen
+            name="LessonDetail"
+            component={LessonDetailScreen as any}
+            options={noHeader}
+          />
+          <Stack.Screen
+            name="QuizDetail"
+            component={QuizDetailScreen as any}
+            options={{ title: "Quiz" } as any}
+          />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} options={noHeader} />

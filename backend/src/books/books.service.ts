@@ -169,6 +169,21 @@ export class BooksService {
     return { ok: true };
   }
 
+  // ---- Book Content (Admin) ----
+  async setBookContent(bookId: string, content: string) {
+    return this.prisma.book.update({
+      where: { id: bookId },
+      data: { contentKey: content },
+    });
+  }
+
+  async setChapterContent(chapterId: string, content: string) {
+    return this.prisma.chapter.update({
+      where: { id: chapterId },
+      data: { contentKey: content },
+    });
+  }
+
   // ---- Chapters (admin) ----
   async upsertChapter(bookId: string, dto: CreateChapterDto) {
     await this.getBook(bookId);

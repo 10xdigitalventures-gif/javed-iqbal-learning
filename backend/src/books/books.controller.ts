@@ -137,6 +137,16 @@ export class BooksController {
     return this.service.deleteBook(id);
   }
 
+  @Post("books/:idOrSlug/content")
+  @Roles(Role.ADMIN)
+  async setBookContent(
+    @Param("idOrSlug") idOrSlug: string,
+    @Body() body: { content: string },
+  ) {
+    const book = await this.service.getBook(idOrSlug);
+    return this.service.setBookContent(book.id, body.content);
+  }
+
   // ---- Chapters (admin) ----
   @Post("books/:bookId/chapters")
   @Roles(Role.ADMIN)
@@ -151,5 +161,14 @@ export class BooksController {
   @Roles(Role.ADMIN)
   deleteChapter(@Param("id") id: string) {
     return this.service.deleteChapter(id);
+  }
+
+  @Post("books/:bookId/chapters/:chapterId/content")
+  @Roles(Role.ADMIN)
+  async setChapterContent(
+    @Param("chapterId") chapterId: string,
+    @Body() body: { content: string },
+  ) {
+    return this.service.setChapterContent(chapterId, body.content);
   }
 }
