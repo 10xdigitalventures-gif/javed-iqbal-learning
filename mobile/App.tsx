@@ -11,13 +11,14 @@ import { colors } from "./src/theme";
 import { syncActivity } from "./src/activity";
 
 import HomeScreen from "./src/screens/HomeScreen";
+import ExploreScreen from "./src/screens/ExploreScreen";
 import LibraryScreen from "./src/screens/LibraryScreen";
-import MyLearningScreen from "./src/screens/MyLearningScreen";
 import CommunityScreen from "./src/screens/CommunityScreen";
 import MessagesScreen from "./src/screens/MessagesScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
 import BookDetailScreen from "./src/screens/BookDetailScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
+import AudioBooksScreen from "./src/screens/AudioBooksScreen";
 import CheckoutScreen from "./src/screens/CheckoutScreen";
 import HardCopyOrderScreen from "./src/screens/HardCopyOrderScreen";
 import ChatScreen from "./src/screens/ChatScreen";
@@ -39,13 +40,15 @@ const brandHeader = {
 } as const;
 
 const bookDetailOpts = { title: "Book" } as const;
+const audioBooksOpts = { ...brandHeader, title: "Audio Books" } as const;
 const checkoutOpts = { title: "Checkout" } as const;
 const hardCopyOpts = { title: "Order hard copy" } as const;
+const coursesOpts = { ...brandHeader, title: "Courses" } as const;
 
 const TAB_ICONS: Record<string, string> = {
   Home: "home",
+  Explore: "compass",
   Library: "library",
-  "My Learning": "school",
   Community: "people",
   Messages: "chatbubbles",
   Profile: "person",
@@ -75,21 +78,8 @@ function Tabs() {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen name="Explore" component={ExploreScreen as any} />
       <Tab.Screen name="Library" component={LibraryScreen} />
-      <Tab.Screen name="My Learning" component={MyLearningScreen} />
-      <Tab.Screen
-        name="Courses"
-        component={CoursesScreen as any}
-        options={{
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? "school" : "school-outline"}
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
       <Tab.Screen name="Community" component={CommunityScreen} />
       <Tab.Screen name="Messages" component={MessagesScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
@@ -127,6 +117,11 @@ function Root() {
             options={noHeader}
           />
           <Stack.Screen
+            name="AudioBooks"
+            component={AudioBooksScreen as any}
+            options={audioBooksOpts}
+          />
+          <Stack.Screen
             name="Checkout"
             component={CheckoutScreen}
             options={checkoutOpts}
@@ -137,6 +132,11 @@ function Root() {
             options={hardCopyOpts}
           />
           <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen
+            name="Courses"
+            component={CoursesScreen as any}
+            options={coursesOpts}
+          />
           <Stack.Screen
             name="CourseDetail"
             component={CourseDetailScreen as any}

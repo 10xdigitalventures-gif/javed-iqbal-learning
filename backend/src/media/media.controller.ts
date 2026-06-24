@@ -15,9 +15,10 @@ import type { Response } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { extname } from "path";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { StorageService } from "./storage.service";
+import { StorageService as CloudStorageService } from "../storage/storage.service";
 import { MediaService } from "./media.service";
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
@@ -28,8 +29,22 @@ if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 export class MediaController {
   constructor(
     private readonly storage: StorageService,
+    private readonly cloud: CloudStorageService,
     private readonly media: MediaService,
   ) {}
+
+  // Returns true when a real cloud provider is configured (Supabase/Bunny/R2).
+  // When false, we keep the legacy local-disk + HMAC-signed-URL behaviour so
+  // local development works without any cloud credentials.
+  private cloudEnabled(): boolean {
+    const p = (process.env.STORAGE_PROVIDER || "").toLowerCase();
+    if (p === "supabase")
+      return !!(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
+    if (p === "bunny") return !!process.env.BUNNY_STORAGE_KEY;
+    if (p === "r2" || p === "s3")
+      return !!(process.env.CLOUDFLARE_R2_KEY || process.env.S3_ACCESS_KEY_ID);
+    return false;
+  }
 
   // Accepts a single file under field name "file". Returns a signed, expiring
   // URL plus the server-verified media duration (for audio/video).
@@ -53,15 +68,41 @@ export class MediaController {
       },
     }),
   )
-  upload(@UploadedFile() file?: Express.Multer.File) {
+  async upload(@UploadedFile() file?: Express.Multer.File) {
     if (!file) throw new BadRequestException("File is required");
 
     // Server-side duration verification for audio/video (never trust client).
+    // ffprobe needs a real file path, so we always probe the temp disk file
+    // before (optionally) pushing the bytes to the cloud.
     let durationSec: number | null = null;
     if (file.mimetype.startsWith("audio/") || file.mimetype.startsWith("video/")) {
       durationSec = this.media.probeDurationSec(file.path);
     }
 
+    // Cloud path: push the bytes to the configured provider (e.g. Supabase),
+    // remove the local temp copy, and return a short-lived signed URL.
+    if (this.cloudEnabled()) {
+      const key = `media/${file.filename}`;
+      const buf = readFileSync(file.path);
+      await this.cloud.uploadFile(key, buf, file.mimetype);
+      try {
+        unlinkSync(file.path);
+      } catch {
+        // best-effort temp cleanup; ignore if it was already removed
+      }
+      const url = await this.cloud.getSignedUrl(key);
+      return {
+        key,
+        url,
+        filename: file.filename,
+        mimetype: file.mimetype,
+        size: file.size,
+        durationSec,
+        storage: "cloud",
+      };
+    }
+
+    // Legacy local path: file stays on disk, served via signed /media/file/:key.
     return {
       key: file.filename,
       url: this.storage.signedUrl(file.filename),
@@ -69,6 +110,7 @@ export class MediaController {
       mimetype: file.mimetype,
       size: file.size,
       durationSec,
+      storage: "local",
     };
   }
 
@@ -76,8 +118,9 @@ export class MediaController {
   // refresh playback links for older messages).
   @Get("sign")
   @UseGuards(JwtAuthGuard)
-  sign(@Query("key") key: string) {
+  async sign(@Query("key") key: string) {
     if (!key) throw new BadRequestException("key is required");
+    if (this.cloudEnabled()) return { url: await this.cloud.getSignedUrl(key) };
     return { url: this.storage.signedUrl(key) };
   }
 
@@ -90,8 +133,8 @@ export class MediaController {
     @Query("sig") sig: string,
     @Res() res: Response,
   ) {
-    if (this.storage.isS3())
-      throw new NotFoundException("Local delivery disabled when using S3");
+    if (this.cloudEnabled() || this.storage.isS3())
+      throw new NotFoundException("Local delivery disabled when using cloud storage");
     if (!this.storage.verifyLocalSignature(key, Number(exp), sig))
       throw new BadRequestException("Invalid or expired link");
     const path = this.storage.localPath(key);
