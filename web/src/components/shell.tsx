@@ -11,6 +11,7 @@ import {
   CalendarClock,
   CreditCard,
   GraduationCap,
+  Headphones,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -46,6 +47,9 @@ const nav = {
   CLIENT: [
     { href: "/client", label: "Dashboard", icon: LayoutDashboard },
     { href: "/client/consultants", label: "Consultants", icon: Users },
+    { href: "/client/library", label: "My Library", icon: BookOpen },
+    { href: "/client/audiobooks", label: "Audio Books", icon: Headphones },
+    { href: "/client/courses", label: "Courses", icon: GraduationCap },
     { href: "/client/packages", label: "Packages", icon: Package },
     { href: "/client/messages", label: "Messages", icon: MessageSquare },
     { href: "/client/meetings", label: "Meetings", icon: CalendarClock },
