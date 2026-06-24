@@ -27,4 +27,19 @@ export class SettingsController {
   update(@Body() values: Record<string, string>) {
     return this.service.update(values);
   }
+
+  // Admin-only: payment + storage environment configuration schema & values.
+  @Get("env")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  getEnv() {
+    return this.service.getEnv();
+  }
+
+  @Put("env")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  updateEnv(@Body() values: Record<string, string>) {
+    return this.service.updateEnv(values);
+  }
 }

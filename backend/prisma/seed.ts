@@ -64,6 +64,32 @@ async function main() {
     },
   });
 
+  // Two fresh client accounts with NO package assigned and nothing purchased.
+  // Useful for testing the first-time buyer / empty-library experience.
+  const freshClient1 = await prisma.user.upsert({
+    where: { email: "newclient1@example.com" },
+    update: {},
+    create: {
+      email: "newclient1@example.com",
+      password,
+      name: "Hamza Tariq",
+      role: Role.CLIENT,
+    },
+  });
+  const freshClient2 = await prisma.user.upsert({
+    where: { email: "newclient2@example.com" },
+    update: {},
+    create: {
+      email: "newclient2@example.com",
+      password,
+      name: "Zainab Raza",
+      role: Role.CLIENT,
+    },
+  });
+  // These two intentionally receive no entitlements, purchases or packages.
+  void freshClient1;
+  void freshClient2;
+
   // ---------------------------------------------------------------------------
   // Fresh package structure.
   //

@@ -13,7 +13,7 @@ import {
   useRoute,
 } from "@react-navigation/native";
 import { api } from "../api";
-import { Button, Loading } from "../components";
+import { Button, GatewayModal, Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
 import { BookCover, formatPrice } from "../ui";
 import { trackEvent } from "../activity";
@@ -31,6 +31,8 @@ export default function BookDetailScreen() {
   const [busy, setBusy] = useState(false);
   const [item, setItem] = useState<any>(null);
   const [hasAccess, setHasAccess] = useState(false);
+  const [gwVisible, setGwVisible] = useState(false);
+  const [providers, setProviders] = useState<string[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -59,16 +61,42 @@ export default function BookDetailScreen() {
       </View>
     );
 
+  // Step 1 \u2013 figure out which gateways are available. If more than one is
+  // enabled (e.g. PayFast + Whop) we ask the user to choose; otherwise we go
+  // straight to checkout with the only option.
   async function buy() {
     try {
       setBusy(true);
+      const res = await api("/payments/providers").catch(() => ({
+        providers: [],
+      }));
+      const list: string[] = (res?.providers || []).filter(Boolean);
+      if (list.length > 1) {
+        setProviders(list);
+        setGwVisible(true);
+        setBusy(false);
+        return;
+      }
+      await proceed(list[0]);
+    } catch (e: any) {
+      Alert.alert("Checkout", e?.message || "Could not start checkout.");
+      setBusy(false);
+    }
+  }
+
+  // Step 2 \u2013 create the order + payment, record the chosen gateway, and open
+  // the hosted checkout in the in-app WebView.
+  async function proceed(gateway?: string) {
+    try {
+      setBusy(true);
+      setGwVisible(false);
       const body: any = { kind: isBundle ? "BUNDLE" : "BOOK" };
       if (isBundle) body.bundleId = item.id;
       else body.bookId = item.id;
       const order = await api("/orders", { method: "POST", body });
       const pay = await api("/payments/checkout/" + order.payment.id, {
         method: "POST",
-        body: {},
+        body: gateway ? { gateway } : {},
       });
       nav.navigate("Checkout", {
         url: pay.url,
@@ -116,7 +144,7 @@ export default function BookDetailScreen() {
 
       {hasAccess ? (
         <View style={s.ownedBadge}>
-          <Text style={s.ownedText}>✓ In your library</Text>
+          <Text style={s.ownedText}>\u2713 In your library</Text>
         </View>
       ) : null}
 
@@ -127,7 +155,7 @@ export default function BookDetailScreen() {
           <Button
             title={
               busy
-                ? "Please wait…"
+                ? "Please wait\u2026"
                 : "Buy " + formatPrice(item.price, item.currency)
             }
             onPress={buy}
@@ -192,6 +220,14 @@ export default function BookDetailScreen() {
         </>
       ) : null}
       <View style={s.footer} />
+
+      <GatewayModal
+        visible={gwVisible}
+        providers={providers}
+        busy={busy}
+        onPick={proceed}
+        onClose={() => setGwVisible(false)}
+      />
     </ScrollView>
   );
 }

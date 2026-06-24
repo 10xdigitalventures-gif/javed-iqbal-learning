@@ -49,8 +49,8 @@ export default function CheckoutScreen() {
         </Text>
         <View style={s.actions}>
           <Button
-            title="Go to My Learning"
-            onPress={() => nav.navigate("Tabs", { screen: "My Learning" })}
+            title="Go to My Library"
+            onPress={() => nav.navigate("Tabs", { screen: "Library" })}
           />
           <View style={s.spacer} />
           <Button

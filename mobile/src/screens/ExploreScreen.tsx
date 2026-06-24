@@ -138,6 +138,7 @@ export default function ExploreScreen() {
                 name={(active ? c.icon : c.icon + "-outline") as any}
                 size={16}
                 color={active ? "#fff" : colors.brand}
+                style={s.catChipIcon}
               />
               <Text style={[s.catChipText, active ? s.catChipTextActive : null]}>
                 {c.label}
@@ -257,11 +258,11 @@ const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   flex1: { flex: 1 },
   catBar: { maxHeight: 56, marginTop: 8 },
-  catBarContent: { paddingHorizontal: spacing.lg, paddingVertical: 8, gap: 8 },
+  catBarContent: { paddingHorizontal: spacing.lg, paddingVertical: 8 },
   catChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    marginRight: 8,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: radius.pill,
@@ -269,6 +270,7 @@ const s = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.card,
   },
+  catChipIcon: { marginRight: 6 },
   catChipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   catChipText: { fontSize: 13, fontWeight: "700", color: colors.brand },
   catChipTextActive: { color: "#fff" },
@@ -284,7 +286,7 @@ const s = StyleSheet.create({
     color: colors.text,
   },
   filterBar: { maxHeight: 48, marginTop: 4 },
-  filterContent: { paddingHorizontal: spacing.lg, paddingVertical: 8, gap: 8 },
+  filterContent: { paddingHorizontal: spacing.lg, paddingVertical: 8 },
   listContent: { padding: spacing.lg, paddingBottom: 32 },
   col: { justifyContent: "space-between" },
   gridItem: { width: "48%", marginBottom: 18 },
