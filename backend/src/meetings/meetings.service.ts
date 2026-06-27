@@ -15,6 +15,84 @@ import {
   SetAvailabilityDto,
 } from "./dto";
 
+
+
+// ---------------------------------------------------------------------------
+// Google Calendar / Meet auto-link
+// Requires env vars: GOOGLE_SA_EMAIL, GOOGLE_SA_KEY (PEM private key, \n-escaped)
+// GOOGLE_CALENDAR_DELEGATE – email of the calendar owner to impersonate
+// All three must be set; if any is missing the feature is silently skipped.
+// ---------------------------------------------------------------------------
+async function createGoogleMeetLink(
+  title: string,
+  startIso: string,
+  endIso: string,
+): Promise<string | null> {
+  try {
+    const saEmail = process.env.GOOGLE_SA_EMAIL;
+    const saKey = (process.env.GOOGLE_SA_KEY || '').replace(/\\n/g, '\n');
+    const delegate = process.env.GOOGLE_CALENDAR_DELEGATE;
+    if (!saEmail || !saKey || !delegate) return null;
+
+    // Build JWT for service-account auth (RS256)
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: saEmail,
+      sub: delegate,
+      scope: 'https://www.googleapis.com/auth/calendar',
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: now,
+      exp: now + 3600,
+    };
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const b64u = (obj: object) =>
+      Buffer.from(JSON.stringify(obj)).toString('base64url');
+    const unsigned = b64u(header) + '.' + b64u(payload);
+
+    const { createSign } = await import('crypto');
+    const signer = createSign('RSA-SHA256');
+    signer.update(unsigned);
+    const sig = signer.sign(saKey, 'base64url');
+    const jwt = unsigned + '.' + sig;
+
+    // Exchange JWT for access token
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: jwt,
+      }).toString(),
+    });
+    const tokenData: any = await tokenRes.json();
+    if (!tokenData.access_token) return null;
+
+    // Create Calendar event with conferenceData (Google Meet)
+    const reqId = `consulthub-${Date.now()}`;
+    const eventRes = await fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          summary: title,
+          start: { dateTime: startIso },
+          end: { dateTime: endIso },
+          conferenceData: {
+            createRequest: { requestId: reqId, conferenceSolutionKey: { type: 'hangoutsMeet' } },
+          },
+        }),
+      },
+    );
+    const event: any = await eventRes.json();
+    return event?.hangoutLink || event?.conferenceData?.entryPoints?.[0]?.uri || null;
+  } catch {
+    return null;
+  }
+}
 @Injectable()
 export class MeetingsService {
   constructor(
@@ -105,11 +183,23 @@ export class MeetingsService {
         throw new BadRequestException("No remaining sessions in this package");
     }
 
+    // Auto-generate Google Meet link when not supplied manually.
+    let resolvedUrl = meetingUrl ?? meeting.meetingUrl ?? null;
+    if (!resolvedUrl && meeting.scheduledAt) {
+      const start = meeting.scheduledAt;
+      const end = new Date(start.getTime() + (meeting.durationMin || 60) * 60000);
+      resolvedUrl = await createGoogleMeetLink(
+        meeting.title,
+        start.toISOString(),
+        end.toISOString(),
+      );
+    }
+
     const updated = await this.prisma.meeting.update({
       where: { id },
       data: {
         status: MeetingStatus.APPROVED,
-        meetingUrl: meetingUrl ?? meeting.meetingUrl,
+        meetingUrl: resolvedUrl ?? meeting.meetingUrl,
       },
     });
     if (meeting.purchaseId) await this.usage.consume(meeting.purchaseId, "session");

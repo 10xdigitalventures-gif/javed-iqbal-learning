@@ -99,7 +99,7 @@ export function Shell({
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-slate-200 bg-white/95 px-4 py-5 shadow-sm backdrop-blur lg:block">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 flex-col border-r border-slate-200 bg-white/95 px-4 py-5 shadow-sm backdrop-blur lg:flex">
         <div className="mb-7 flex items-center gap-3 px-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand text-white">
             <ShieldCheck className="h-5 w-5" aria-hidden="true" />
@@ -111,7 +111,7 @@ export function Shell({
             </p>
           </div>
         </div>
-        <nav className="space-y-1" aria-label="Main navigation">
+        <nav className="flex-1 space-y-1 overflow-y-auto pb-16" aria-label="Main navigation">
           {nav[role].map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;

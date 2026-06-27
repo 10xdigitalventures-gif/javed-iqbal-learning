@@ -596,6 +596,7 @@ function LessonPlayer({
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [playLoading, setPlayLoading] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
   // Resume-where-you-left-off + periodic progress reporting for video lessons.
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -637,6 +638,7 @@ function LessonPlayer({
     setPosterUrl(null);
     setSubTab("details");
     setShowMore(false);
+    setVideoError(false);
     didSeek.current = false;
     lastReport.current = 0;
     // Resolve the lesson thumbnail (storage key or external URL) so it can be
@@ -754,8 +756,22 @@ function LessonPlayer({
                 onLoadedMetadata={onVideoMeta}
                 onTimeUpdate={onVideoTime}
                 onPause={onVideoTime}
-                className="h-full w-full"
+                onError={() => setVideoError(true)}
+                className={videoError ? "hidden" : "h-full w-full"}
               />
+              {videoError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/90 text-white">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                  <p className="text-sm font-semibold">Could not play this video</p>
+                  <p className="text-xs text-white/60">The link may have expired. Try reloading.</p>
+                  <button
+                    onClick={() => { setVideoError(false); setPlayUrl(null); setPlayLoading(true); (async () => { try { const u = await resolveMediaUrl(lesson.contentKey); setPlayUrl(u); } finally { setPlayLoading(false); } })(); }}
+                    className="mt-1 rounded-lg bg-white/20 px-5 py-2 text-sm font-bold hover:bg-white/30"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
             );
           })()}
           <Watermark text={watermark} />

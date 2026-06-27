@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   StyleSheet,
@@ -90,6 +91,13 @@ export default function CourseDetailScreen() {
         .finally(() => setLoading(false));
     }, [idOrSlug]),
   );
+
+  // Re-fetch the course (used after a review is added / removed).
+  const reload = useCallback(() => {
+    api("/courses/" + idOrSlug)
+      .then((d: any) => setCourse(d))
+      .catch(() => {});
+  }, [idOrSlug]);
 
   if (loading) return <Loading />;
   if (!course)
