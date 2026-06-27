@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, uploadFile } from "@/lib/api";
@@ -25,7 +25,7 @@ type BankDetails = {
   instructions?: string;
 };
 
-export default function BankTransferPage() {
+function BankTransferInner() {
   const search = useSearchParams();
   const ref = search.get("ref") || "";
 
@@ -219,5 +219,15 @@ export default function BankTransferPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary for static prerendering
+// (Next.js 14). Wrap the inner client component so the build doesn't bail out.
+export default function BankTransferPage() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <BankTransferInner />
+    </Suspense>
   );
 }

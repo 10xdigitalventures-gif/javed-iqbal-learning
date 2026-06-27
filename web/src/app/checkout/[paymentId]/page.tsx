@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -11,7 +11,7 @@ import { ChevronLeft, ShieldCheck } from "lucide-react";
 // Dedicated checkout screen. The order + pending payment are already created;
 // here the customer picks a payment gateway and we hand off to the hosted
 // redirect for that gateway (PayFast, Whop, ...).
-export default function CheckoutPage() {
+function CheckoutInner() {
   const params = useParams();
   const search = useSearchParams();
   const paymentId = String(params.paymentId);
@@ -122,5 +122,15 @@ export default function CheckoutPage() {
         </p>
       </Card>
     </div>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary (Next.js 14). Wrap the inner
+// client component so the production build doesn't bail out of prerendering.
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <CheckoutInner />
+    </Suspense>
   );
 }
