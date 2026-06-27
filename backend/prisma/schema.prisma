@@ -572,6 +572,11 @@ model Book {
   description String?
   coverUrl    String?
   language    String  @default("en")
+  // Optional secondary-language (Urdu) edition fields so a single book can
+  // hold both an English and an Urdu version in one record. The reader shows a
+  // language toggle when any Urdu content is present.
+  titleUrdu       String?
+  descriptionUrdu String?
   pageCount   Int?
   categoryId  String?
 
@@ -593,6 +598,8 @@ model Book {
   // is a short, freely viewable sample. Raw files are never exposed directly.
   contentKey        String?
   previewContentKey String?
+  // Urdu edition of the full single-file content (parallel to contentKey).
+  contentKeyUrdu    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -615,8 +622,14 @@ model Chapter {
   bookId     String
   index      Int
   title      String
+  titleUrdu  String?
   // Encrypted/protected content reference for this chapter.
-  contentKey String?
+  contentKey     String?
+  // Urdu edition of this chapter's content (parallel to contentKey).
+  contentKeyUrdu String?
+  // Free preview/lecture: readable without purchasing the book. Lets admins
+  // hand-pick which chapters are shown for free.
+  isFree     Boolean @default(false)
   pageStart  Int?
   pageEnd    Int?
 

@@ -16,7 +16,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { extname } from "path";
-import { existsSync, mkdirSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { Role } from "@prisma/client";
 import { BooksService } from "./books.service";
 import {
@@ -144,6 +144,13 @@ export class BooksController {
     });
   }
 
+  // Poll the status / progress of a background PDF import job (see import-pdf).
+  @Get("books/import-jobs/:jobId")
+  @Roles(Role.ADMIN)
+  getImportJob(@Param("jobId") jobId: string) {
+    return this.service.getImportJob(jobId);
+  }
+
   @Get("books/:idOrSlug")
   getBook(@Param("idOrSlug") idOrSlug: string) {
     return this.service.getBook(idOrSlug);
@@ -237,18 +244,14 @@ export class BooksController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException("PDF file is required");
-    try {
-      return await this.service.importPdfChapters(bookId, file.path, {
-        replace: replace !== "false",
-        ocr: ocr === "true",
-      });
-    } finally {
-      try {
-        unlinkSync(file.path);
-      } catch {
-        // best-effort temp cleanup
-      }
-    }
+    // OCR can run for several minutes; if we processed it inside this request
+    // the proxy/gateway would cut the connection with a 504. Instead we start a
+    // background job and return its id immediately, then the UI polls for
+    // progress. The temp upload is cleaned up by the job when it finishes.
+    return this.service.startImportJob(bookId, file.path, {
+      replace: replace !== "false",
+      ocr: ocr === "true",
+    });
   }
 
   @Delete("chapters/:id")

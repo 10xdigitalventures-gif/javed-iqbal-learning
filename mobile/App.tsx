@@ -29,6 +29,9 @@ import HardCopyOrderScreen from "./src/screens/HardCopyOrderScreen";
 import BankTransferScreen from "./src/screens/BankTransferScreen";
 import ChatScreen from "./src/screens/ChatScreen";
 import LoginScreen from "./src/screens/LoginScreen";
+import PackagesScreen from "./src/screens/PackagesScreen";
+import MeetingsScreen from "./src/screens/MeetingsScreen";
+import ConsultantsScreen from "./src/screens/ConsultantsScreen";
 
 import CoursesScreen from "./src/screens/CoursesScreen";
 import CertificatesScreen from "./src/screens/CertificatesScreen";
@@ -52,6 +55,9 @@ const checkoutOpts = { title: "Checkout" } as const;
 const hardCopyOpts = { title: "Order hard copy" } as const;
 const coursesOpts = { ...brandHeader, title: "Courses" } as const;
 const certificatesOpts = { ...brandHeader, title: "My Certificates" } as const;
+const packagesOpts = { ...brandHeader, title: "Packages" } as const;
+const meetingsOpts = { ...brandHeader, title: "My meetings" } as const;
+const consultantsOpts = { ...brandHeader, title: "Find consultants" } as const;
 
 const TAB_ICONS: Record<string, string> = {
   Home: "home",
@@ -69,7 +75,10 @@ function Tabs() {
   // Always keep a comfortable gap below the tabs on top of the device's bottom
   // safe-area inset, so tabs are never clipped and stay easy to tap on phones
   // both with and without a gesture bar.
-  const bottomInset = Math.max(insets.bottom, 36) + 22;
+  // Comfortable gap below the tabs on top of the device's bottom safe-area
+  // inset. Kept roughly half of the previous value so the tab bar no longer
+  // leaves a large empty band at the bottom of the screen.
+  const bottomInset = Math.max(insets.bottom, 16) + 8;
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -182,6 +191,21 @@ function Root() {
             name="QuizDetail"
             component={QuizDetailScreen as any}
             options={{ title: "Quiz" } as any}
+          />
+          <Stack.Screen
+            name="Packages"
+            component={PackagesScreen as any}
+            options={packagesOpts}
+          />
+          <Stack.Screen
+            name="Meetings"
+            component={MeetingsScreen as any}
+            options={meetingsOpts}
+          />
+          <Stack.Screen
+            name="Consultants"
+            component={ConsultantsScreen as any}
+            options={consultantsOpts}
           />
         </>
       ) : (

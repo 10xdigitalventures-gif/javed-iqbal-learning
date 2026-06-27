@@ -5,7 +5,8 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
-import { readFileSync } from "fs";
+import { readFileSync, unlinkSync } from "fs";
+import { randomUUID } from "crypto";
 import {
   CreateBookDto,
   CreateBundleDto,
@@ -19,9 +20,87 @@ import {
 // Catalog (books, bundles, categories) + admin CRUD. Content bytes are never
 // served here — only metadata and a chapter outline. Protected content is
 // delivered through LibraryService after an entitlement check.
+type ImportJob = {
+  id: string;
+  bookId: string;
+  status: "running" | "done" | "error";
+  page: number;
+  totalPages: number;
+  phase: string;
+  result?: { created: number; pages: number | null };
+  error?: string;
+  startedAt: number;
+  finishedAt?: number;
+};
+
 @Injectable()
 export class BooksService {
   constructor(private prisma: PrismaService) {}
+
+  // In-memory PDF import jobs. OCR can take several minutes, so import-pdf
+  // returns a jobId immediately and the heavy work runs in the background; the
+  // admin UI polls getImportJob() for progress. Single-process store, which is
+  // fine for a single API instance.
+  private importJobs = new Map<string, ImportJob>();
+
+  // Start a background PDF import and return its id right away so the HTTP
+  // request finishes instantly (no gateway 504 even for long OCR runs).
+  startImportJob(
+    bookId: string,
+    filePath: string,
+    opts: { replace?: boolean; ocr?: boolean } = {},
+  ): { jobId: string } {
+    const id = randomUUID();
+    const job: ImportJob = {
+      id,
+      bookId,
+      status: "running",
+      page: 0,
+      totalPages: 0,
+      phase: opts.ocr ? "Starting OCR" : "Extracting text",
+      startedAt: Date.now(),
+    };
+    this.importJobs.set(id, job);
+    this.pruneImportJobs();
+    // Fire and forget: do NOT await, so the request returns immediately.
+    void this.importPdfChapters(bookId, filePath, opts, (p) => {
+      job.page = p.page;
+      job.totalPages = p.totalPages;
+      job.phase = p.phase;
+    })
+      .then((result) => {
+        job.status = "done";
+        job.result = { created: result.created, pages: result.pages };
+        job.finishedAt = Date.now();
+      })
+      .catch((e: any) => {
+        job.status = "error";
+        job.error = e?.message || "PDF import failed";
+        job.finishedAt = Date.now();
+      })
+      .finally(() => {
+        try {
+          unlinkSync(filePath);
+        } catch {
+          // best-effort temp cleanup
+        }
+      });
+    return { jobId: id };
+  }
+
+  getImportJob(jobId: string): ImportJob {
+    const job = this.importJobs.get(jobId);
+    if (!job) throw new NotFoundException("Import job not found or expired");
+    return job;
+  }
+
+  // Drop finished jobs older than an hour so the map can't grow forever.
+  private pruneImportJobs() {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [jid, j] of this.importJobs) {
+      if (j.finishedAt && j.finishedAt < cutoff) this.importJobs.delete(jid);
+    }
+  }
 
   private slugify(input: string) {
     return input
@@ -159,6 +238,8 @@ export class BooksService {
             id: true,
             index: true,
             title: true,
+            titleUrdu: true,
+            isFree: true,
             pageStart: true,
             pageEnd: true,
           },
@@ -203,6 +284,9 @@ export class BooksService {
         isPublished: dto.isPublished ?? true,
         contentKey: dto.contentKey ?? null,
         previewContentKey: dto.previewContentKey ?? null,
+        titleUrdu: dto.titleUrdu ?? null,
+        descriptionUrdu: dto.descriptionUrdu ?? null,
+        contentKeyUrdu: dto.contentKeyUrdu ?? null,
       },
     });
   }
@@ -243,6 +327,16 @@ export class BooksService {
         contentKey: dto.contentKey ?? null,
         pageStart: dto.pageStart ?? null,
         pageEnd: dto.pageEnd ?? null,
+        // Only touch the secondary-language / free fields when the caller
+        // actually sends them, so partial saves (e.g. audio upload) never wipe
+        // an existing Urdu edition or free flag.
+        ...(dto.titleUrdu !== undefined
+          ? { titleUrdu: dto.titleUrdu || null }
+          : {}),
+        ...(dto.contentKeyUrdu !== undefined
+          ? { contentKeyUrdu: dto.contentKeyUrdu || null }
+          : {}),
+        ...(dto.isFree !== undefined ? { isFree: dto.isFree } : {}),
       },
       create: {
         bookId,
@@ -251,6 +345,9 @@ export class BooksService {
         contentKey: dto.contentKey ?? null,
         pageStart: dto.pageStart ?? null,
         pageEnd: dto.pageEnd ?? null,
+        titleUrdu: dto.titleUrdu || null,
+        contentKeyUrdu: dto.contentKeyUrdu || null,
+        isFree: dto.isFree ?? false,
       },
     });
   }
@@ -300,6 +397,11 @@ export class BooksService {
     bookId: string,
     filePath: string,
     opts: { replace?: boolean; ocr?: boolean } = {},
+    onProgress?: (p: {
+      page: number;
+      totalPages: number;
+      phase: string;
+    }) => void,
   ) {
     await this.getBook(bookId);
 
@@ -338,10 +440,11 @@ export class BooksService {
             "with the Urdu language pack (tesseract-ocr + the 'urd' traineddata), " +
             "then import again.",
         );
-      const ocr = await this.ocrPdfToText(filePath);
+      const ocr = await this.ocrPdfToText(filePath, onProgress);
       text = ocr.text;
       numpages = numpages || ocr.pages;
     }
+    onProgress?.({ page: 0, totalPages: 0, phase: "Saving chapters" });
 
     const sections = this.splitTextIntoChapters(text);
     if (!sections.length)
@@ -430,10 +533,15 @@ export class BooksService {
   // directly with no system packages.
   private async ocrPdfToText(
     filePath: string,
+    onProgress?: (p: {
+      page: number;
+      totalPages: number;
+      phase: string;
+    }) => void,
   ): Promise<{ text: string; pages: number }> {
     if (this.systemOcrAvailable()) {
       try {
-        return await this.ocrPdfToTextNative(filePath);
+        return await this.ocrPdfToTextNative(filePath, onProgress);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn(
@@ -441,7 +549,7 @@ export class BooksService {
         );
       }
     }
-    return this.ocrPdfToTextWasm(filePath);
+    return this.ocrPdfToTextWasm(filePath, onProgress);
   }
 
   // Bundled WASM OCR (no system install). pdf-to-img (pdfjs + @napi-rs/canvas,
@@ -453,6 +561,11 @@ export class BooksService {
   // server/proxy request timeout for big ones.
   private async ocrPdfToTextWasm(
     filePath: string,
+    onProgress?: (p: {
+      page: number;
+      totalPages: number;
+      phase: string;
+    }) => void,
   ): Promise<{ text: string; pages: number }> {
     const lang = process.env.OCR_LANG || "urd+eng";
     const scale = Number(process.env.OCR_SCALE || 2);
@@ -473,6 +586,8 @@ export class BooksService {
     const worker = await createWorker(langs);
     try {
       const document = await pdf(filePath, { scale });
+      const total = Number((document as any).length) || 0;
+      onProgress?.({ page: 0, totalPages: total, phase: "Rendering pages" });
       const parts: string[] = [];
       let pages = 0;
       for await (const image of document) {
@@ -481,6 +596,11 @@ export class BooksService {
           data: { text: pageText },
         } = await worker.recognize(image);
         if (pageText && pageText.trim()) parts.push(pageText.trim());
+        onProgress?.({
+          page: pages,
+          totalPages: total || pages,
+          phase: "Reading text (OCR)",
+        });
       }
       return { text: parts.join("\n\n"), pages };
     } finally {
@@ -496,6 +616,11 @@ export class BooksService {
   // those tools are installed; see the ocrPdfToText() dispatcher.
   private async ocrPdfToTextNative(
     filePath: string,
+    onProgress?: (p: {
+      page: number;
+      totalPages: number;
+      phase: string;
+    }) => void,
   ): Promise<{ text: string; pages: number }> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { execFileSync } = require("child_process");
@@ -522,7 +647,13 @@ export class BooksService {
         .sort();
 
       // 2) OCR each page in order.
+      onProgress?.({
+        page: 0,
+        totalPages: images.length,
+        phase: "Reading text (OCR)",
+      });
       const parts: string[] = [];
+      let done = 0;
       for (const img of images) {
         const out = execFileSync(
           "tesseract",
@@ -530,6 +661,12 @@ export class BooksService {
           { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 },
         ) as string;
         if (out && out.trim()) parts.push(out.trim());
+        done++;
+        onProgress?.({
+          page: done,
+          totalPages: images.length,
+          phase: "Reading text (OCR)",
+        });
       }
       return { text: parts.join("\n\n"), pages: images.length };
     } finally {

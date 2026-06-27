@@ -42,6 +42,10 @@ type Book = {
   isPublished: boolean;
   isFeatured: boolean;
   contentKey?: string | null;
+  language?: string;
+  titleUrdu?: string | null;
+  descriptionUrdu?: string | null;
+  contentKeyUrdu?: string | null;
 };
 
 type AdminChapter = {
@@ -49,6 +53,9 @@ type AdminChapter = {
   index: number;
   title: string;
   contentKey?: string | null;
+  titleUrdu?: string | null;
+  contentKeyUrdu?: string | null;
+  isFree?: boolean;
   pageStart?: number | null;
   pageEnd?: number | null;
 };
@@ -124,6 +131,9 @@ function ChapterManager({ bookId }: { bookId: string }) {
           index: c.index,
           title: c.title || "Untitled",
           contentKey: c.contentKey || "",
+          titleUrdu: c.titleUrdu || "",
+          contentKeyUrdu: c.contentKeyUrdu || "",
+          isFree: !!c.isFree,
         },
       });
     } catch (e: any) {
@@ -186,12 +196,18 @@ function ChapterManager({ bookId }: { bookId: string }) {
 
   async function importPdf(file: File, replace: boolean, ocr = false) {
     setImporting(true);
-    setImportMsg(null);
+    setImportMsg(
+      ocr
+        ? "Starting OCR import - large or scanned books can take a few minutes..."
+        : "Importing PDF...",
+    );
     setError(null);
     try {
       const token = getToken();
       const form = new FormData();
       form.append("file", file);
+      // Start the background job. This request only uploads the file and gets a
+      // job id back right away, so it can never hit the gateway 504 timeout.
       const res = await fetch(
         `${API_URL}/books/${bookId}/import-pdf?replace=${replace}&ocr=${ocr}`,
         {
@@ -210,7 +226,8 @@ function ChapterManager({ bookId }: { bookId: string }) {
         }
         throw new Error(m);
       }
-      const data = await res.json();
+      const { jobId } = await res.json();
+      const data = await pollImportJob(jobId, token);
       setImportMsg(
         `Imported ${data.created} chapter(s) from ${
           data.pages ?? "?"
@@ -219,10 +236,45 @@ function ChapterManager({ bookId }: { bookId: string }) {
       await load();
     } catch (e: any) {
       setError(e.message);
+      setImportMsg(null);
     } finally {
       setImporting(false);
       if (pdfInputRef.current) pdfInputRef.current.value = "";
     }
+  }
+
+  // Poll a background import job until it finishes. Each poll is a tiny, fast
+  // request, so even a 10-minute OCR run never trips the proxy timeout.
+  async function pollImportJob(
+    jobId: string,
+    token: string | null,
+  ): Promise<{ created: number; pages: number | null }> {
+    for (let i = 0; i < 1200; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      let job: any;
+      try {
+        const res = await fetch(`${API_URL}/books/import-jobs/${jobId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) continue; // transient error - keep polling
+        job = await res.json();
+      } catch {
+        continue; // network hiccup - keep polling
+      }
+      if (job.totalPages) {
+        setImportMsg(
+          `${job.phase || "Working"} - ${job.page}/${job.totalPages} pages...`,
+        );
+      } else if (job.phase) {
+        setImportMsg(`${job.phase}...`);
+      }
+      if (job.status === "done") return job.result;
+      if (job.status === "error")
+        throw new Error(job.error || "PDF import failed");
+    }
+    throw new Error(
+      "Import is taking longer than expected. It may still finish on the server - refresh this page in a few minutes.",
+    );
   }
 
   return (
@@ -337,6 +389,16 @@ function ChapterManager({ bookId }: { bookId: string }) {
                   </Button>
                 </div>
 
+                <input
+                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                  dir="rtl"
+                  value={c.titleUrdu || ""}
+                  onChange={(e) =>
+                    patchLocal(c.id, { titleUrdu: e.target.value })
+                  }
+                  placeholder="Urdu chapter title (optional)"
+                />
+
                 {audio ? (
                   <div className="mt-3 flex items-center gap-2 rounded-lg bg-brand-light px-3 py-2 text-sm text-brand-dark">
                     <Music className="h-4 w-4" />
@@ -362,6 +424,27 @@ function ChapterManager({ bookId }: { bookId: string }) {
                     }
                   />
                 )}
+
+                <Textarea
+                  className="mt-3"
+                  dir="rtl"
+                  rows={5}
+                  placeholder="Urdu version of this chapter's text (optional). Leave empty for an English-only book."
+                  value={c.contentKeyUrdu || ""}
+                  onChange={(e) =>
+                    patchLocal(c.id, { contentKeyUrdu: e.target.value })
+                  }
+                />
+                <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!c.isFree}
+                    onChange={(e) =>
+                      patchLocal(c.id, { isFree: e.target.checked })
+                    }
+                  />
+                  Free preview chapter (clients can read without buying)
+                </label>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Button
@@ -435,6 +518,10 @@ export default function EbooksAdminPage() {
     categoryId: "",
     pageCount: 0,
     contentKey: "",
+    language: "en",
+    titleUrdu: "",
+    descriptionUrdu: "",
+    contentKeyUrdu: "",
   });
 
   function loadBooks() {
@@ -487,6 +574,10 @@ export default function EbooksAdminPage() {
       categoryId: "",
       pageCount: 0,
       contentKey: "",
+      language: "en",
+      titleUrdu: "",
+      descriptionUrdu: "",
+      contentKeyUrdu: "",
     });
     setEditing(null);
   }
@@ -528,6 +619,10 @@ export default function EbooksAdminPage() {
       categoryId: (b as any).categoryId || "",
       pageCount: (b as any).pageCount || 0,
       contentKey: b.contentKey || "",
+      language: b.language || "en",
+      titleUrdu: b.titleUrdu || "",
+      descriptionUrdu: b.descriptionUrdu || "",
+      contentKeyUrdu: (b as any).contentKeyUrdu || "",
     });
     setShowForm(true);
   }
@@ -555,11 +650,11 @@ export default function EbooksAdminPage() {
           <Button
             onClick={() => {
               resetForm();
-              setShowForm(!showForm);
+              setShowForm(true);
             }}
           >
             <Plus className="h-4 w-4" />
-            {showForm ? "Cancel" : "New E-Book"}
+            New E-Book
           </Button>
         }
       />
@@ -570,10 +665,18 @@ export default function EbooksAdminPage() {
             <form onSubmit={saveBook} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <Input
-                  label="Title"
+                  label="Title (English)"
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   required
+                />
+                <Input
+                  label="Title (Urdu, optional)"
+                  dir="rtl"
+                  value={form.titleUrdu}
+                  onChange={(e) =>
+                    setForm({ ...form, titleUrdu: e.target.value })
+                  }
                 />
                 <Input
                   label="Slug (optional)"
@@ -630,11 +733,20 @@ export default function EbooksAdminPage() {
                 </Select>
               </div>
               <Textarea
-                label="Description"
+                label="Description (English)"
                 rows={3}
                 value={form.description}
                 onChange={(e) =>
                   setForm({ ...form, description: e.target.value })
+                }
+              />
+              <Textarea
+                label="Description (Urdu, optional)"
+                dir="rtl"
+                rows={3}
+                value={form.descriptionUrdu}
+                onChange={(e) =>
+                  setForm({ ...form, descriptionUrdu: e.target.value })
                 }
               />
 
@@ -664,6 +776,17 @@ export default function EbooksAdminPage() {
                 />
               )}
 
+              <Textarea
+                label="Full E-Book Text Content (Urdu, optional)"
+                dir="rtl"
+                rows={8}
+                placeholder="Urdu version of the full single-file book text (optional). Readers get a language toggle when this is filled."
+                value={form.contentKeyUrdu}
+                onChange={(e) =>
+                  setForm({ ...form, contentKeyUrdu: e.target.value })
+                }
+              />
+
               <div className="flex flex-wrap items-center gap-3">
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50">
                   {bookAudioBusy ? (
@@ -689,7 +812,7 @@ export default function EbooksAdminPage() {
                 </span>
               </div>
 
-              <div className="flex flex-wrap gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <Select
                   label="Access Type"
                   value={form.accessType}
@@ -700,7 +823,19 @@ export default function EbooksAdminPage() {
                   <option value="LIFETIME">Lifetime (one-time purchase)</option>
                   <option value="SUBSCRIPTION">Subscription</option>
                 </Select>
-                <label className="flex items-end gap-2 pb-2 text-sm font-medium text-slate-700">
+                <Select
+                  label="Primary Language"
+                  value={form.language}
+                  onChange={(e) =>
+                    setForm({ ...form, language: e.target.value })
+                  }
+                >
+                  <option value="en">English</option>
+                  <option value="ur">Urdu</option>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   <input
                     type="checkbox"
                     checked={form.allowHardCopy}
@@ -710,7 +845,7 @@ export default function EbooksAdminPage() {
                   />
                   Allow Hard Copy
                 </label>
-                <label className="flex items-end gap-2 pb-2 text-sm font-medium text-slate-700">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   <input
                     type="checkbox"
                     checked={form.isFeatured}
@@ -720,7 +855,7 @@ export default function EbooksAdminPage() {
                   />
                   Featured
                 </label>
-                <label className="flex items-end gap-2 pb-2 text-sm font-medium text-slate-700">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   <input
                     type="checkbox"
                     checked={form.isPublished}

@@ -115,8 +115,12 @@ export class LibraryService {
   // Returns user-bound AES-256-GCM ciphertext for a chapter (or the whole book).
   // In production `contentKey` resolves to the protected source in object
   // storage; here we synthesize deterministic content so the flow is testable.
-  async getSecureContent(userId: string, bookId: string, chapterId?: string) {
-    await this.assertAccess(userId, bookId);
+  async getSecureContent(
+    userId: string,
+    bookId: string,
+    chapterId?: string,
+    lang?: string,
+  ) {
     const book = await this.prisma.book.findUnique({
       where: { id: bookId },
       include: { chapters: { orderBy: { index: "asc" } } },
@@ -127,7 +131,15 @@ export class LibraryService {
       ? book.chapters.find((c) => c.id === chapterId)
       : book.chapters[0];
 
-    const plaintext = this.resolveProtectedSource(book, chapter);
+    // Free preview chapters are readable without an entitlement so the admin
+    // can hand-pick sample lectures. Everything else needs full access.
+    const hasFull = await this.hasAccess(userId, bookId);
+    const isFree = !!chapter?.isFree;
+    if (!hasFull && !isFree)
+      throw new ForbiddenException("Purchase this book to read it");
+
+    const wantUrdu = (lang || "").toLowerCase().startsWith("ur");
+    const plaintext = this.resolveProtectedSource(book, chapter, wantUrdu);
     const encrypted = this.encryptForUser(userId, bookId, plaintext);
     return {
       bookId,
@@ -138,7 +150,16 @@ export class LibraryService {
         id: c.id,
         index: c.index,
         title: c.title,
+        titleUrdu: c.titleUrdu,
+        isFree: c.isFree,
       })),
+      language: wantUrdu ? "ur" : "en",
+      hasUrdu: !!(
+        book.contentKeyUrdu ||
+        book.chapters.some((c) => c.contentKeyUrdu)
+      ),
+      locked: !hasFull,
+      isFree,
       // Canonical readable text for the in-app reader. Delivered ONLY over an
       // authenticated, entitlement-checked API (never a downloadable file) and
       // immediately re-encrypted at rest on-device by mobile/src/secure.ts. The
@@ -326,9 +347,23 @@ export class LibraryService {
   // Placeholder for the real protected source fetch. Production: stream the
   // encrypted original from object storage by contentKey.
   private resolveProtectedSource(
-    book: { title: string; author: string; contentKey: string | null },
-    chapter?: { title: string; contentKey: string | null } | null,
+    book: {
+      title: string;
+      author: string;
+      contentKey: string | null;
+      contentKeyUrdu?: string | null;
+    },
+    chapter?: {
+      title: string;
+      contentKey: string | null;
+      contentKeyUrdu?: string | null;
+    } | null,
+    urdu = false,
   ) {
+    if (urdu) {
+      if (chapter && chapter.contentKeyUrdu) return chapter.contentKeyUrdu;
+      if (!chapter && book.contentKeyUrdu) return book.contentKeyUrdu;
+    }
     if (chapter?.contentKey) return chapter.contentKey;
     if (book.contentKey) return book.contentKey;
     const heading = chapter ? chapter.title : book.title;

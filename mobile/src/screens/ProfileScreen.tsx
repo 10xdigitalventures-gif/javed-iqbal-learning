@@ -94,6 +94,24 @@ export default function ProfileScreen() {
       onPress: () => nav.navigate("Certificates", {}),
     },
     {
+      icon: "people-outline",
+      label: "Find a consultant",
+      hint: "Browse consultants and start a conversation",
+      onPress: () => nav.navigate("Consultants", {}),
+    },
+    {
+      icon: "pricetags-outline",
+      label: "Message & session packages",
+      hint: "Buy text, audio, video and session credits",
+      onPress: () => nav.navigate("Packages", {}),
+    },
+    {
+      icon: "calendar-outline",
+      label: "My meetings",
+      hint: "View and manage your booked sessions",
+      onPress: () => nav.navigate("Meetings", {}),
+    },
+    {
       icon: "notifications-outline",
       label: "Notifications",
       hint: "Choose how you get alerts (email, SMS, WhatsApp, push)",

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FlatList, Linking, Text, View, StyleSheet } from "react-native";
+import { FlatList, Text, View, StyleSheet } from "react-native";
 import { api } from "../api";
 import {
   Badge,
@@ -11,10 +11,13 @@ import {
 } from "../components";
 import { colors } from "../theme";
 
-export default function PackagesScreen() {
+export default function PackagesScreen({ navigation, route }: any) {
   const [list, setList] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // When opened from a chat that ran out of credits we know which consultant
+  // the package should be tied to (required for non-global plans).
+  const consultantId: string | undefined = route?.params?.consultantId;
 
   useEffect(() => {
     api("/packages")
@@ -26,14 +29,17 @@ export default function PackagesScreen() {
     setError(null);
     setBusy(pkg.id);
     try {
-      const res = await api("/purchases", {
-        method: "POST",
-        body: { packageId: pkg.id },
+      const body: any = { packageId: pkg.id };
+      if (consultantId) body.consultantId = consultantId;
+      const res = await api("/purchases", { method: "POST", body });
+      // Hand off to the in-app checkout (gateway picker + hosted payment),
+      // consistent with the rest of the app instead of opening a browser.
+      navigation.navigate("Checkout", {
+        paymentId: res.payment.id,
+        title: pkg.name,
+        amount: Number(res.payment.amount),
+        currency: res.payment.currency,
       });
-      const checkout = await api(`/payments/checkout/${res.payment.id}`, {
-        method: "POST",
-      });
-      Linking.openURL(checkout.url);
     } catch (err: any) {
       setError(err.message);
     } finally {

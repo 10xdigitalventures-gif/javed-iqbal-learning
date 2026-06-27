@@ -44,6 +44,10 @@ export class CreateBookDto {
 
   @IsOptional() @IsString() contentKey?: string;
   @IsOptional() @IsString() previewContentKey?: string;
+
+  @IsOptional() @IsString() titleUrdu?: string;
+  @IsOptional() @IsString() descriptionUrdu?: string;
+  @IsOptional() @IsString() contentKeyUrdu?: string;
 }
 
 export class UpdateBookDto extends CreateBookDto {
@@ -54,6 +58,9 @@ export class CreateChapterDto {
   @IsInt() index: number;
   @IsString() title: string;
   @IsOptional() @IsString() contentKey?: string;
+  @IsOptional() @IsString() titleUrdu?: string;
+  @IsOptional() @IsString() contentKeyUrdu?: string;
+  @IsOptional() @IsBoolean() isFree?: boolean;
   @IsOptional() @IsInt() pageStart?: number;
   @IsOptional() @IsInt() pageEnd?: number;
 }

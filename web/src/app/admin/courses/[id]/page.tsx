@@ -4,9 +4,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Plus,
   Trash2,
-  Upload,
-  Link2,
-  FolderOpen,
   Image as ImageIcon,
   Check,
   Loader2,
@@ -16,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Save,
+  Pencil,
 } from "lucide-react";
 import {
   api,
@@ -133,6 +131,243 @@ function asFiles(v: SubFile[] | string | null | undefined): SubFile[] {
   }
 }
 
+type MediaVals = {
+  source: VideoSource;
+  contentKey: string;
+  videoUrl: string;
+  durationSec: number | null;
+};
+
+// Reusable video / document source picker rendered as a DROPDOWN (Upload, Link,
+// Media Library). Shared by the Add Lesson form and the per-lesson editor.
+function LessonSourceFields({
+  type,
+  source,
+  contentKey,
+  videoUrl,
+  durationSec,
+  onChange,
+}: {
+  type: string;
+  source: VideoSource;
+  contentKey: string;
+  videoUrl: string;
+  durationSec: number | null;
+  onChange: (patch: Partial<MediaVals>) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [mediaItems, setMediaItems] = useState<MediaAsset[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const mediaFilter = type === "PDF" ? "pdf" : "video";
+
+  async function loadMedia() {
+    setMediaLoading(true);
+    try {
+      setMediaItems(await listMedia(mediaFilter));
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setMediaLoading(false);
+    }
+  }
+
+  function pick(src: VideoSource) {
+    onChange({ source: src });
+    if (src === "MEDIA") loadMedia();
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setErr(null);
+    try {
+      const r = await uploadFile(file);
+      onChange({
+        source: "UPLOAD",
+        contentKey: r.key,
+        durationSec: r.durationSec ?? durationSec,
+      });
+    } catch (e: any) {
+      setErr(e.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <p className="mb-3 text-sm font-semibold text-slate-900">
+        {type === "PDF" ? "Document source" : "Video source"}
+      </p>
+      <div className="mb-4 max-w-xs">
+        <Select
+          label=""
+          value={source}
+          onChange={(e) => pick(e.target.value as VideoSource)}
+        >
+          <option value="UPLOAD">Upload</option>
+          <option value="LINK">Link (YouTube / Vimeo)</option>
+          <option value="MEDIA">Media Library</option>
+        </Select>
+      </div>
+
+      {source === "UPLOAD" && (
+        <div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept={type === "PDF" ? "application/pdf" : "video/*"}
+            onChange={onFile}
+            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-dark"
+          />
+          {uploading && (
+            <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
+              <Loader2 className="h-3 w-3 animate-spin" /> Uploading to
+              storage...
+            </p>
+          )}
+          {contentKey && !uploading && (
+            <p className="mt-2 inline-flex items-center gap-1 text-xs text-green-600">
+              <Check className="h-3 w-3" /> Uploaded
+              {durationSec ? ` - ${Math.round(durationSec / 60)} min` : ""}
+            </p>
+          )}
+        </div>
+      )}
+
+      {source === "LINK" && (
+        <Input
+          label="Video link (YouTube, Vimeo, or direct .mp4)"
+          placeholder="https://youtu.be/..."
+          value={videoUrl}
+          onChange={(e) => onChange({ videoUrl: e.target.value })}
+        />
+      )}
+
+      {source === "MEDIA" && (
+        <div>
+          {mediaLoading ? (
+            <p className="inline-flex items-center gap-1 text-xs text-slate-500">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading library...
+            </p>
+          ) : mediaItems.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              No items in your Media Library yet. Upload one first.
+            </p>
+          ) : (
+            <div className="grid max-h-48 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+              {mediaItems.map((m) => (
+                <button
+                  type="button"
+                  key={m.id}
+                  onClick={() =>
+                    onChange({
+                      source: "MEDIA",
+                      contentKey: m.key,
+                      durationSec: m.durationSec ?? durationSec,
+                    })
+                  }
+                  className={`truncate rounded-lg border px-3 py-2 text-left text-xs transition ${
+                    contentKey === m.key
+                      ? "border-brand bg-brand-light text-brand-dark"
+                      : "border-slate-200 text-slate-600 hover:border-brand"
+                  }`}
+                  title={m.filename}
+                >
+                  {contentKey === m.key ? (
+                    <Check className="mb-1 h-3 w-3" />
+                  ) : null}
+                  {m.filename}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <ErrorText message={err} />
+    </div>
+  );
+}
+
+// Reusable thumbnail picker with an Upload / Link DROPDOWN. thumbnailUrl stores
+// either a storage key (upload) or an external image URL (link).
+function ThumbnailField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [mode, setMode] = useState<"UPLOAD" | "LINK">(
+    value && /^https?:\/\//i.test(value) ? "LINK" : "UPLOAD",
+  );
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const r = await uploadFile(file);
+      onChange(r.key);
+    } catch {
+      alert("Thumbnail upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <p className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+        <ImageIcon className="h-4 w-4" /> Thumbnail (optional)
+      </p>
+      <div className="mb-3 max-w-xs">
+        <Select
+          label=""
+          value={mode}
+          onChange={(e) => setMode(e.target.value as "UPLOAD" | "LINK")}
+        >
+          <option value="UPLOAD">Upload image</option>
+          <option value="LINK">Image link (URL)</option>
+        </Select>
+      </div>
+      {mode === "UPLOAD" ? (
+        <div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            onChange={onFile}
+            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-200 file:px-4 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-300"
+          />
+          {uploading && (
+            <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
+              <Loader2 className="h-3 w-3 animate-spin" /> Uploading thumbnail...
+            </p>
+          )}
+          {value && !uploading && (
+            <p className="mt-2 inline-flex items-center gap-1 text-xs text-green-600">
+              <Check className="h-3 w-3" /> Thumbnail ready
+            </p>
+          )}
+        </div>
+      ) : (
+        <Input
+          label="Thumbnail image URL"
+          placeholder="https://.../image.jpg"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function CourseDetailPage({
   params,
 }: {
@@ -148,11 +383,7 @@ export default function CourseDetailPage({
   );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [mediaItems, setMediaItems] = useState<MediaAsset[]>([]);
-  const [mediaLoading, setMediaLoading] = useState(false);
 
-  const videoInput = useRef<HTMLInputElement>(null);
-  const thumbInput = useRef<HTMLInputElement>(null);
   const refInput = useRef<HTMLInputElement>(null);
 
   async function reload() {
@@ -170,58 +401,6 @@ export default function CourseDetailPage({
   // inline body, quizzes/assignments are managed in their own tabs.
   const isPlayable = form.type === "VIDEO" || form.type === "PDF";
   const isAssignment = form.type === "ASSIGNMENT";
-  const mediaFilter = form.type === "PDF" ? "pdf" : "video";
-
-  async function loadMedia() {
-    setMediaLoading(true);
-    try {
-      setMediaItems(await listMedia(mediaFilter));
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setMediaLoading(false);
-    }
-  }
-
-  function pickSource(src: VideoSource) {
-    setForm((f) => ({ ...f, source: src }));
-    if (src === "MEDIA") loadMedia();
-  }
-
-  async function onVideoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading("video");
-    setErr(null);
-    try {
-      const r = await uploadFile(file);
-      setForm((f) => ({
-        ...f,
-        contentKey: r.key,
-        source: "UPLOAD",
-        durationSec: r.durationSec ?? f.durationSec,
-      }));
-    } catch (e: any) {
-      setErr(e.message || "Video upload failed");
-    } finally {
-      setUploading(null);
-    }
-  }
-
-  async function onThumbFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading("thumb");
-    setErr(null);
-    try {
-      const r = await uploadFile(file);
-      setForm((f) => ({ ...f, thumbnailUrl: r.key }));
-    } catch (e: any) {
-      setErr(e.message || "Thumbnail upload failed");
-    } finally {
-      setUploading(null);
-    }
-  }
 
   // Upload one or more instructor reference files for the new assignment.
   async function onRefFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -251,15 +430,6 @@ export default function CourseDetailPage({
     setForm((f) => ({
       ...f,
       refFiles: f.refFiles.filter((x) => x.key !== key),
-    }));
-  }
-
-  function chooseFromMedia(asset: MediaAsset) {
-    setForm((f) => ({
-      ...f,
-      source: "MEDIA",
-      contentKey: asset.key,
-      durationSec: asset.durationSec ?? f.durationSec,
     }));
   }
 
@@ -314,8 +484,6 @@ export default function CourseDetailPage({
       }
 
       setForm({ ...BLANK });
-      if (videoInput.current) videoInput.current.value = "";
-      if (thumbInput.current) thumbInput.current.value = "";
       if (refInput.current) refInput.current.value = "";
       await reload();
     } catch (e: any) {
@@ -503,138 +671,24 @@ export default function CourseDetailPage({
                 </div>
               )}
 
-              {/* 4-option media source for playable lessons */}
+              {/* Video / document source (dropdown) for playable lessons */}
               {isPlayable && (
-                <div className="rounded-xl border border-slate-200 p-4">
-                  <p className="mb-3 text-sm font-semibold text-slate-900">
-                    {form.type === "PDF" ? "Document source" : "Video source"}
-                  </p>
-                  <div className="mb-4 flex flex-wrap gap-2">
-                    {(
-                      [
-                        ["UPLOAD", "Upload", Upload],
-                        ["LINK", "Link (YouTube / Vimeo)", Link2],
-                        ["MEDIA", "Media Library", FolderOpen],
-                      ] as const
-                    ).map(([val, label, Icon]) => (
-                      <button
-                        type="button"
-                        key={val}
-                        onClick={() => pickSource(val)}
-                        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                          form.source === val
-                            ? "bg-brand text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {form.source === "UPLOAD" && (
-                    <div>
-                      <input
-                        ref={videoInput}
-                        type="file"
-                        accept={
-                          form.type === "PDF" ? "application/pdf" : "video/*"
-                        }
-                        onChange={onVideoFile}
-                        className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-dark"
-                      />
-                      {uploading === "video" && (
-                        <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
-                          <Loader2 className="h-3 w-3 animate-spin" /> Uploading
-                          to storage...
-                        </p>
-                      )}
-                      {form.contentKey && uploading !== "video" && (
-                        <p className="mt-2 inline-flex items-center gap-1 text-xs text-green-600">
-                          <Check className="h-3 w-3" /> Uploaded
-                          {form.durationSec
-                            ? ` - ${Math.round(form.durationSec / 60)} min`
-                            : ""}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {form.source === "LINK" && (
-                    <Input
-                      label="Video link (YouTube, Vimeo, or direct .mp4)"
-                      placeholder="https://youtu.be/..."
-                      value={form.videoUrl}
-                      onChange={(e) =>
-                        setForm({ ...form, videoUrl: e.target.value })
-                      }
-                    />
-                  )}
-
-                  {form.source === "MEDIA" && (
-                    <div>
-                      {mediaLoading ? (
-                        <p className="inline-flex items-center gap-1 text-xs text-slate-500">
-                          <Loader2 className="h-3 w-3 animate-spin" /> Loading
-                          library...
-                        </p>
-                      ) : mediaItems.length === 0 ? (
-                        <p className="text-xs text-slate-500">
-                          No items in your Media Library yet. Upload one first.
-                        </p>
-                      ) : (
-                        <div className="grid max-h-48 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
-                          {mediaItems.map((m) => (
-                            <button
-                              type="button"
-                              key={m.id}
-                              onClick={() => chooseFromMedia(m)}
-                              className={`truncate rounded-lg border px-3 py-2 text-left text-xs transition ${
-                                form.contentKey === m.key
-                                  ? "border-brand bg-brand-light text-brand-dark"
-                                  : "border-slate-200 text-slate-600 hover:border-brand"
-                              }`}
-                              title={m.filename}
-                            >
-                              {form.contentKey === m.key ? (
-                                <Check className="mb-1 h-3 w-3" />
-                              ) : null}
-                              {m.filename}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <LessonSourceFields
+                  type={form.type}
+                  source={form.source}
+                  contentKey={form.contentKey}
+                  videoUrl={form.videoUrl}
+                  durationSec={form.durationSec}
+                  onChange={(p) => setForm((f) => ({ ...f, ...p }))}
+                />
               )}
 
-              {/* Thumbnail - available for playable + assignment lesson types */}
+              {/* Thumbnail (upload or link) for non-quiz lessons */}
               {form.type !== "QUIZ" && (
-                <div className="rounded-xl border border-slate-200 p-4">
-                  <p className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                    <ImageIcon className="h-4 w-4" /> Thumbnail (optional)
-                  </p>
-                  <input
-                    ref={thumbInput}
-                    type="file"
-                    accept="image/*"
-                    onChange={onThumbFile}
-                    className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-200 file:px-4 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-300"
-                  />
-                  {uploading === "thumb" && (
-                    <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Uploading
-                      thumbnail...
-                    </p>
-                  )}
-                  {form.thumbnailUrl && uploading !== "thumb" && (
-                    <p className="mt-2 inline-flex items-center gap-1 text-xs text-green-600">
-                      <Check className="h-3 w-3" /> Thumbnail ready
-                    </p>
-                  )}
-                </div>
+                <ThumbnailField
+                  value={form.thumbnailUrl}
+                  onChange={(v) => setForm((f) => ({ ...f, thumbnailUrl: v }))}
+                />
               )}
 
               <ErrorText message={err} />
@@ -897,7 +951,8 @@ function ModuleRow({
   );
 }
 
-// A lesson row in the admin list, with inline module + drip-lock assignment.
+// A lesson row in the admin list: inline module + drip-lock assignment, plus a
+// full "Edit" panel (title, free-preview, video source, thumbnail).
 function LessonRow({
   lesson,
   modules,
@@ -917,18 +972,48 @@ function LessonRow({
   const [busy, setBusy] = useState(false);
   const moduleTitle = modules.find((m) => m.id === lesson.moduleId)?.title;
 
+  // Full-edit panel state.
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(lesson.title);
+  const [isPreview, setIsPreview] = useState(lesson.isPreview);
+  const [source, setSource] = useState<VideoSource>(
+    (lesson.source as VideoSource) || "UPLOAD",
+  );
+  const [contentKey, setContentKey] = useState(lesson.contentKey || "");
+  const [videoUrl, setVideoUrl] = useState(lesson.videoUrl || "");
+  const [thumbnailUrl, setThumbnailUrl] = useState(lesson.thumbnailUrl || "");
+  const [durationSec, setDurationSec] = useState<number | null>(
+    lesson.durationSec ?? null,
+  );
+  const isPlayable = lesson.type === "VIDEO" || lesson.type === "PDF";
+
   async function save() {
     setBusy(true);
     try {
-      await api(`/courses/lessons/${lesson.id}`, {
-        method: "PATCH",
-        body: {
-          moduleId: moduleId || null,
-          lockMode,
-          unlockDelayHours: lockMode === "BOTH" ? Number(delay) : 0,
-        },
-      });
+      const body: Record<string, unknown> = {
+        moduleId: moduleId || null,
+        lockMode,
+        unlockDelayHours: lockMode === "BOTH" ? Number(delay) : 0,
+      };
+      if (editing) {
+        body.title = title;
+        body.isPreview = isPreview;
+        body.thumbnailUrl = thumbnailUrl || null;
+        if (isPlayable) {
+          body.source = source;
+          if (source === "LINK") {
+            body.videoUrl = videoUrl || null;
+            body.contentKey = null;
+          } else {
+            body.contentKey = contentKey || null;
+            body.videoUrl = null;
+          }
+          if (durationSec != null) body.durationSec = durationSec;
+        }
+      }
+      await api(`/courses/lessons/${lesson.id}`, { method: "PATCH", body });
       await onChanged();
+      setEditing(false);
     } finally {
       setBusy(false);
     }
@@ -957,10 +1042,52 @@ function LessonRow({
             </div>
           </div>
         </div>
-        <Button variant="danger" onClick={onRemove}>
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setEditing((v) => !v)}>
+            <Pencil className="h-4 w-4" /> {editing ? "Close" : "Edit"}
+          </Button>
+          <Button variant="danger" onClick={onRemove}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
+
+      {editing && (
+        <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <Input
+            label="Lesson title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={isPreview}
+              onChange={(e) => setIsPreview(e.target.checked)}
+            />
+            Free Preview
+          </label>
+          {isPlayable && (
+            <LessonSourceFields
+              type={lesson.type}
+              source={source}
+              contentKey={contentKey}
+              videoUrl={videoUrl}
+              durationSec={durationSec}
+              onChange={(p) => {
+                if (p.source !== undefined) setSource(p.source);
+                if (p.contentKey !== undefined) setContentKey(p.contentKey);
+                if (p.videoUrl !== undefined) setVideoUrl(p.videoUrl);
+                if (p.durationSec !== undefined) setDurationSec(p.durationSec);
+              }}
+            />
+          )}
+          {lesson.type !== "QUIZ" && (
+            <ThumbnailField value={thumbnailUrl} onChange={setThumbnailUrl} />
+          )}
+        </div>
+      )}
+
       <div className="grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
         <Select
           label="Module"
@@ -993,7 +1120,8 @@ function LessonRow({
         )}
       </div>
       <Button onClick={save} disabled={busy}>
-        <Save className="h-4 w-4" /> Save lesson settings
+        <Save className="h-4 w-4" />{" "}
+        {editing ? "Save lesson" : "Save lesson settings"}
       </Button>
     </Card>
   );

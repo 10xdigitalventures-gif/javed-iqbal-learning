@@ -58,8 +58,9 @@ export class LibraryController {
     @CurrentUser() user: AuthUser,
     @Param("bookId") bookId: string,
     @Query("chapterId") chapterId?: string,
+    @Query("lang") lang?: string,
   ) {
-    return this.service.getSecureContent(user.userId, bookId, chapterId);
+    return this.service.getSecureContent(user.userId, bookId, chapterId, lang);
   }
 
   // Returns a secure signed URL to a PDF or Video from the Storage Layer.

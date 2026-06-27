@@ -178,6 +178,8 @@ export default function ChatScreen({ route, navigation }: any) {
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const [actionMsg, setActionMsg] = useState<any | null>(null);
   const typingSentAt = useRef(0);
+  const [allowance, setAllowance] = useState<any>(null);
+  const [consultantId, setConsultantId] = useState<string | null>(null);
 
   useEffect(() => {
     navigation.setOptions({ title: peerName || "Chat" });
@@ -187,6 +189,14 @@ export default function ChatScreen({ route, navigation }: any) {
     try {
       const convo = await api(`/conversations/${conversationId}`);
       setMessages(convo.messages || []);
+      if (convo.consultantId) setConsultantId(convo.consultantId);
+      // Clients see remaining package credits; refresh them so the composer
+      // can prompt a purchase the moment they run out.
+      if (user?.role === "CLIENT" && convo.consultantId) {
+        api(`/purchases/allowance?consultantId=${convo.consultantId}`)
+          .then(setAllowance)
+          .catch(() => {});
+      }
       await api(`/conversations/${conversationId}/read`, { method: "POST" });
     } catch {}
   }
@@ -525,6 +535,11 @@ export default function ChatScreen({ route, navigation }: any) {
     setActionMsg(m);
   }
 
+  // Show a "buy a package" prompt when a client has no remaining text credits
+  // with this consultant.
+  const showBuy =
+    user?.role === "CLIENT" && !!allowance && !allowance.text?.allowed;
+
   return (
     <KeyboardAvoidingView
       style={s.wrap}
@@ -760,6 +775,19 @@ export default function ChatScreen({ route, navigation }: any) {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {showBuy ? (
+        <TouchableOpacity
+          style={s.buyBar}
+          onPress={() => navigation.navigate("Packages", { consultantId })}
+        >
+          <Ionicons name="lock-closed" size={16} color={colors.brand} />
+          <Text style={s.buyText}>
+            You're out of message credits. Tap to buy a package.
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.brand} />
+        </TouchableOpacity>
+      ) : null}
 
       {recording ? (
         <View style={s.inputBar}>
@@ -1085,4 +1113,15 @@ const s = StyleSheet.create({
   },
   replyBarName: { fontSize: 12, fontWeight: "700", color: colors.brand },
   replyBarText: { fontSize: 12, color: colors.muted },
+  buyBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.brandLight,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: colors.brand,
+  },
+  buyText: { flex: 1, color: colors.text, fontSize: 13, fontWeight: "600" },
 });
