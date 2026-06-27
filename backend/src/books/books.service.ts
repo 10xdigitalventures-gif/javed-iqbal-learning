@@ -403,25 +403,98 @@ export class BooksService {
     return spaces / t.length > 0.08 && weird / t.length < 0.08;
   }
 
-  // Whether the Tesseract OCR binary is available on this server.
+  // OCR is ALWAYS available now: the app ships a bundled WASM engine
+  // (tesseract.js + pdf-to-img) that needs NO system install and runs directly
+  // on Windows, macOS and Linux after `npm install`. This stays true so the
+  // import flow never refuses; the work happens in ocrPdfToText().
   private ocrAvailable(): boolean {
+    return true;
+  }
+
+  // Whether the fast NATIVE pipeline (poppler `pdftoppm` + `tesseract` binary)
+  // is installed. Optional speed-up only; when missing we fall back to WASM.
+  private systemOcrAvailable(): boolean {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      require("child_process").execFileSync("tesseract", ["--version"], {
-        stdio: "ignore",
-      });
+      const { execFileSync } = require("child_process");
+      execFileSync("tesseract", ["--version"], { stdio: "ignore" });
+      execFileSync("pdftoppm", ["-v"], { stdio: "ignore" });
       return true;
     } catch {
       return false;
     }
   }
 
-  // Render the PDF to per-page images (poppler's pdftoppm) and OCR each page
-  // with Tesseract. Language defaults to Urdu+English (override with OCR_LANG);
-  // DPI defaults to 300 (override with OCR_DPI). NOTE: OCR is CPU-heavy and can
-  // take a while for large books \u2014 raise your reverse-proxy/server request
-  // timeout, or split very large PDFs, if the request times out.
+  // OCR dispatcher: prefer the fast native pipeline when those binaries are
+  // installed, otherwise use the bundled cross-platform WASM engine so OCR runs
+  // directly with no system packages.
   private async ocrPdfToText(
+    filePath: string,
+  ): Promise<{ text: string; pages: number }> {
+    if (this.systemOcrAvailable()) {
+      try {
+        return await this.ocrPdfToTextNative(filePath);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `Native OCR failed, falling back to bundled WASM OCR: ${(e as Error).message}`,
+        );
+      }
+    }
+    return this.ocrPdfToTextWasm(filePath);
+  }
+
+  // Bundled WASM OCR (no system install). pdf-to-img (pdfjs + @napi-rs/canvas,
+  // prebuilt binaries) renders each page to a PNG, then tesseract.js
+  // (WebAssembly) reads it. Works on Windows/macOS/Linux. Urdu+English by
+  // default (OCR_LANG); render scale via OCR_SCALE (default 2). On first run
+  // tesseract.js downloads the language data once (needs internet). NOTE: WASM
+  // OCR is slow for large books - test on a small PDF first and raise your
+  // server/proxy request timeout for big ones.
+  private async ocrPdfToTextWasm(
+    filePath: string,
+  ): Promise<{ text: string; pages: number }> {
+    const lang = process.env.OCR_LANG || "urd+eng";
+    const scale = Number(process.env.OCR_SCALE || 2);
+    const langs = lang
+      .split("+")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    // pdf-to-img is ESM-only; load it via a REAL dynamic import from CommonJS
+    // (a plain import() would be down-leveled to require() by the TS compiler
+    // and fail on an ESM-only package).
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const dynamicImport = new Function("s", "return import(s)") as (
+      s: string,
+    ) => Promise<any>;
+    const { pdf } = await dynamicImport("pdf-to-img");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createWorker } = require("tesseract.js");
+    const worker = await createWorker(langs);
+    try {
+      const document = await pdf(filePath, { scale });
+      const parts: string[] = [];
+      let pages = 0;
+      for await (const image of document) {
+        pages++;
+        const {
+          data: { text: pageText },
+        } = await worker.recognize(image);
+        if (pageText && pageText.trim()) parts.push(pageText.trim());
+      }
+      return { text: parts.join("\n\n"), pages };
+    } finally {
+      try {
+        await worker.terminate();
+      } catch {
+        // best-effort worker shutdown
+      }
+    }
+  }
+
+  // Fast NATIVE pipeline (poppler + tesseract system binaries). Used only when
+  // those tools are installed; see the ocrPdfToText() dispatcher.
+  private async ocrPdfToTextNative(
     filePath: string,
   ): Promise<{ text: string; pages: number }> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires

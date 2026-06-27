@@ -150,6 +150,10 @@ model User {
   lessonQuestions       LessonQuestion[]
   lessonAnswers         LessonAnswer[]
 
+  // Gamification (Phase 10): points, streaks, badges
+  gameStat              UserGameStat?
+  badges                UserBadge[]
+
   // Plans explicitly assigned to this consultant (many-to-many). Global plans
   // (Package.isGlobal = true) are available to every consultant and are not
   // listed here.
@@ -1156,4 +1160,38 @@ model LessonAnswer {
 
   question LessonQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
   user     User           @relation(fields: [userId], references: [id])
+}
+
+// ---- Gamification (Phase 10): points, streaks, badges ----
+// Per-user game stats. `points` is cached (derived from learning activity in
+// GamificationService) so the leaderboard is a single cheap query; streaks are
+// maintained via daily check-ins from the apps.
+model UserGameStat {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  points        Int      @default(0)
+  currentStreak Int      @default(0)
+  longestStreak Int      @default(0)
+  // Last active calendar day as a YYYY-MM-DD string in the learner's local tz.
+  lastActiveDay String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([points])
+}
+
+// A badge earned by a user. Badge definitions (name/description/icon/criteria)
+// live in code (GamificationService.BADGES); only earned rows are stored here.
+model UserBadge {
+  id       String   @id @default(cuid())
+  userId   String
+  badgeKey String
+  earnedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeKey])
+  @@index([userId])
 }

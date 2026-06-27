@@ -24,6 +24,7 @@ import { ReportsModule } from "./reports/reports.module";
 import { SettingsModule } from "./settings/settings.module";
 import { MediaModule } from "./media/media.module";
 import { AiModule } from "./ai/ai.module";
+import { GamificationModule } from "./gamification/gamification.module";
 import { MailModule } from "./mail/mail.module";
 import { StorageModule } from "./storage/storage.module";
 import { AppController } from "./app.controller";
@@ -61,6 +62,7 @@ import { AppController } from "./app.controller";
     MediaModule,
     StorageModule,
     AiModule,
+    GamificationModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

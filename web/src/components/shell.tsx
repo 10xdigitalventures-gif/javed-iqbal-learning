@@ -23,6 +23,7 @@ import {
   Package,
   Settings,
   ShieldCheck,
+  Trophy,
   Users,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -63,6 +64,7 @@ const nav = {
     { href: "/client/audiobooks", label: "Audio Books", icon: Headphones },
     { href: "/client/courses", label: "Courses", icon: GraduationCap },
     { href: "/client/certificates", label: "Certificates", icon: Award },
+    { href: "/client/achievements", label: "Achievements", icon: Trophy },
     { href: "/client/subscription", label: "Subscription", icon: Crown },
     { href: "/client/packages", label: "Packages", icon: Package },
     { href: "/client/messages", label: "Messages", icon: MessageSquare },
