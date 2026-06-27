@@ -94,6 +94,17 @@ export default function BookDetailScreen() {
       if (isBundle) body.bundleId = item.id;
       else body.bookId = item.id;
       const order = await api("/orders", { method: "POST", body });
+      // Manual bank transfer has no hosted checkout: send the buyer to the
+      // dedicated screen to upload proof for admin verification.
+      if (gateway === "bank_transfer") {
+        nav.navigate("BankTransfer", {
+          paymentId: order.payment.id,
+          amount: order.payment.amount,
+          currency: order.payment.currency,
+          title: item.title,
+        });
+        return;
+      }
       const pay = await api("/payments/checkout/" + order.payment.id, {
         method: "POST",
         body: gateway ? { gateway } : {},

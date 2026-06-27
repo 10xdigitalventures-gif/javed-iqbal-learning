@@ -19,9 +19,11 @@ import { PaymentsModule } from "./payments/payments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { CommunitiesModule } from "./communities/communities.module";
 import { CoursesModule } from "./courses/courses.module";
+import { CertificatesModule } from "./certificates/certificates.module";
 import { ReportsModule } from "./reports/reports.module";
 import { SettingsModule } from "./settings/settings.module";
 import { MediaModule } from "./media/media.module";
+import { AiModule } from "./ai/ai.module";
 import { MailModule } from "./mail/mail.module";
 import { StorageModule } from "./storage/storage.module";
 import { AppController } from "./app.controller";
@@ -53,10 +55,12 @@ import { AppController } from "./app.controller";
     NotificationsModule,
     CommunitiesModule,
     CoursesModule,
+    CertificatesModule,
     ReportsModule,
     SettingsModule,
     MediaModule,
     StorageModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

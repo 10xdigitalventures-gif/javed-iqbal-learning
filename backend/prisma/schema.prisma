@@ -42,6 +42,8 @@ enum MessageType {
   TEXT
   AUDIO
   VIDEO
+  IMAGE
+  FILE
 }
 
 enum MessageStatus {
@@ -73,6 +75,9 @@ enum PaymentKind {
 enum NotificationChannel {
   IN_APP
   EMAIL
+  SMS
+  WHATSAPP
+  PUSH
 }
 
 enum OtpPurpose {
@@ -106,6 +111,7 @@ model User {
   clientConversations     Conversation[] @relation("ClientConversations")
   consultantConversations Conversation[] @relation("ConsultantConversations")
   sentMessages            Message[]      @relation("SentMessages")
+  messageReactions        MessageReaction[] @relation("UserReactions")
   clientPurchases         Purchase[]     @relation("ClientPurchases")
   consultantPurchases     Purchase[]     @relation("ConsultantPurchases")
   availability            Availability[]
@@ -114,6 +120,7 @@ model User {
   payments                Payment[]
   notifications           Notification[]
   communityMemberships    CommunityMember[]
+  notificationPreference  NotificationPreference?
   communityPosts          CommunityPost[]
   communityComments       CommunityComment[]
   communityPostLikes      CommunityPostLike[]
@@ -126,6 +133,7 @@ model User {
   highlights            Highlight[]
   readerNotes           ReaderNote[]
   offlineContents       OfflineContent[]
+  lessonCompletions     LessonCompletion[]
   orders                Order[]
   subscriptions         Subscription[]
   hardCopyOrders        HardCopyOrder[]
@@ -135,6 +143,12 @@ model User {
   quizAttempts          QuizAttempt[]
   assignmentSubmissions AssignmentSubmission[]
   certificates          Certificate[]
+
+  // Engagement (Phase 8): reviews, lesson notes, Q&A
+  courseReviews         CourseReview[]
+  lessonNotes           LessonNote[]
+  lessonQuestions       LessonQuestion[]
+  lessonAnswers         LessonAnswer[]
 
   // Plans explicitly assigned to this consultant (many-to-many). Global plans
   // (Package.isGlobal = true) are available to every consultant and are not
@@ -236,13 +250,33 @@ model Message {
   type           MessageType   @default(TEXT)
   body           String?
   mediaUrl       String?
+  fileName       String?
   durationSec    Int?
   status         MessageStatus @default(SENT)
+  replyToId      String?
+  editedAt       DateTime?
+  deletedAt      DateTime?
   createdAt      DateTime      @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
   sender       User         @relation("SentMessages", fields: [senderId], references: [id])
   purchase     Purchase?    @relation(fields: [purchaseId], references: [id])
+  replyTo      Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies      Message[]    @relation("MessageReplies")
+  reactions    MessageReaction[]
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation("UserReactions", fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
 }
 
 model Availability {
@@ -293,6 +327,13 @@ model Payment {
   // legacy consultation flow uses `purchaseId` instead; exactly one is set.
   orderId    String?
 
+  // Manual bank-transfer fields (gateway = "bank_transfer"). Set when a buyer
+  // submits proof of an offline transfer; an admin verifies to mark it paid.
+  proofKey   String?
+  senderName String?
+  senderRef  String?
+  manualNote String?
+
   user     User      @relation(fields: [userId], references: [id])
   purchase Purchase? @relation(fields: [purchaseId], references: [id])
   order    Order?    @relation(fields: [orderId], references: [id])
@@ -311,6 +352,24 @@ model Notification {
   user User @relation(fields: [userId], references: [id])
 }
 
+// Per-user delivery preferences for notifications. One row per user; created
+// lazily with sensible defaults the first time it is read or updated.
+model NotificationPreference {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  inApp      Boolean  @default(true)
+  email      Boolean  @default(true)
+  sms        Boolean  @default(false)
+  whatsapp   Boolean  @default(false)
+  push       Boolean  @default(true)
+  // Notification "type" values the user has muted across every channel.
+  mutedTypes String[] @default([])
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 model Community {
   id          String   @id @default(cuid())
   name        String
@@ -323,6 +382,7 @@ model Community {
 
   members CommunityMember[]
   posts   CommunityPost[]
+  orders  Order[]
 }
 
 model CommunityMember {
@@ -402,6 +462,7 @@ enum LearningProductKind {
   BUNDLE
   SUBSCRIPTION
   COURSE
+  COMMUNITY
 }
 
 // How a piece of content is accessed once owned.
@@ -452,6 +513,40 @@ enum LessonType {
   TEXT
   QUIZ
   ASSIGNMENT
+}
+
+enum SubmissionStatus {
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum LessonSource {
+  UPLOAD
+  LINK
+  MEDIA
+}
+
+// A reusable media item in the Media Library. Every upload is recorded here so
+// it can be listed, previewed, shared, deleted, and re-used across courses,
+// lessons, communities and messages.
+model MediaAsset {
+  id          String   @id @default(cuid())
+  ownerId     String
+  // Storage object key (cloud) or local filename used to (re)sign URLs.
+  key         String
+  // image | video | audio | pdf | file
+  type        String
+  filename    String
+  mimeType    String
+  size        Int      @default(0)
+  durationSec Int?
+  // cloud | local — which delivery path produced this asset's key.
+  storage     String   @default("cloud")
+  createdAt   DateTime @default(now())
+
+  @@index([ownerId])
+  @@index([type])
 }
 
 model BookCategory {
@@ -572,6 +667,7 @@ model Order {
   bundleId String?
   planId   String?
   courseId String?
+  communityId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -581,6 +677,7 @@ model Order {
   bundle   Bundle?          @relation(fields: [bundleId], references: [id])
   plan     SubscriptionPlan? @relation(fields: [planId], references: [id])
   course   Course?          @relation(fields: [courseId], references: [id])
+  community Community?       @relation(fields: [communityId], references: [id])
   payments Payment[]
 }
 
@@ -630,6 +727,10 @@ model ReadingProgress {
   percentComplete   Float    @default(0)
   chaptersCompleted Int      @default(0)
   readingSeconds    Int      @default(0)
+  // Audiobook listening position: last chapter played + offset within it (sec).
+  lastAudioChapterId String?
+  audioPositionSec   Int     @default(0)
+  audioDurationSec   Int?
   isCompleted       Boolean  @default(false)
   lastReadAt        DateTime @default(now())
   createdAt         DateTime @default(now())
@@ -714,6 +815,12 @@ model Subscription {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
+  // Dunning / retry state for auto-renewing subscriptions.
+  renewAttempts  Int       @default(0)
+  lastReminderAt DateTime?
+  graceUntil     DateTime? // access continues until this date while payment is retried
+  pendingOrderId String? // the open renewal order awaiting payment
+
   user User             @relation(fields: [userId], references: [id])
   plan SubscriptionPlan @relation(fields: [planId], references: [id])
 }
@@ -752,6 +859,35 @@ model CommunityPostLike {
 // FUTURE COURSE SYSTEM (scaffolded — not wired into controllers yet)
 // ============================================================================
 
+// Unlock rule for a module or lesson:
+//   SINGLE = unlock as soon as the previous item is completed by the learner.
+//   BOTH   = previous item completed AND a time delay has elapsed since then.
+enum ModuleLockMode {
+  SINGLE
+  BOTH
+}
+
+// A section/chapter grouping lessons inside a course. Modules unlock in order;
+// a module can additionally be time-gated ("drip") so it only opens N hours
+// after the previous module was completed by that learner.
+model CourseModule {
+  id               String         @id @default(cuid())
+  courseId         String
+  title            String
+  index            Int
+  lockMode         ModuleLockMode @default(SINGLE)
+  // Hours to wait after the previous module is completed before this one opens.
+  // Only enforced when lockMode = BOTH.
+  unlockDelayHours Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@unique([courseId, index])
+}
+
 model Course {
   id          String  @id @default(cuid())
   title       String
@@ -765,11 +901,13 @@ model Course {
   updatedAt   DateTime @updatedAt
 
   lessons     Lesson[]
+  modules     CourseModule[]
   enrollments Enrollment[]
   quizzes     Quiz[]
   assignments Assignment[]
   certificates Certificate[]
   orders      Order[]
+  reviews     CourseReview[]
 }
 
 model Lesson {
@@ -780,11 +918,30 @@ model Lesson {
   type       LessonType @default(VIDEO)
   // Protected/encrypted streaming or document reference. Never a direct download URL.
   contentKey String?
+  // External streaming/embed URL (YouTube, Vimeo, or direct file) used when source = LINK.
+  videoUrl     String?
+  // Optional per-lesson thumbnail/poster image (URL or storage key).
+  thumbnailUrl String?
+  // Where the lesson media comes from: UPLOAD (bucket), LINK (external), MEDIA (library pick).
+  source       LessonSource @default(UPLOAD)
   durationSec Int?
   isPreview  Boolean    @default(false)
 
+  // Optional grouping into a CourseModule (section). Null = ungrouped (legacy).
+  moduleId   String?
+  // Per-lesson unlock rule. SINGLE = unlock as soon as the previous lesson is
+  // completed; BOTH = previous lesson completed AND the time delay elapsed.
+  lockMode         ModuleLockMode @default(SINGLE)
+  // Hours to wait after the previous lesson is completed before this one opens.
+  // Only enforced when lockMode = BOTH.
+  unlockDelayHours Int            @default(0)
+
   course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module CourseModule? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
   quiz   Quiz?
+  completions LessonCompletion[]
+  notes       LessonNote[]
+  questions   LessonQuestion[]
 
   @@unique([courseId, index])
 }
@@ -804,12 +961,24 @@ model Enrollment {
   @@unique([userId, courseId])
 }
 
+enum QuizQuestionType {
+  SINGLE
+  MULTI
+  TRUE_FALSE
+}
+
 model Quiz {
   id       String @id @default(cuid())
   courseId String
   lessonId String? @unique
   title    String
   passScore Int    @default(70)
+  // Optional countdown for the whole quiz, in seconds (null = no timer).
+  timeLimitSec Int?
+  // Allowed attempts (0 = unlimited).
+  maxAttempts  Int @default(0)
+  // Randomize question + option order per attempt.
+  shuffle      Boolean @default(false)
 
   course    Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
   lesson    Lesson?        @relation(fields: [lessonId], references: [id])
@@ -822,9 +991,17 @@ model QuizQuestion {
   quizId  String
   index   Int
   prompt  String
+  type    QuizQuestionType @default(SINGLE)
+  // Marks awarded for this question (weighted scoring).
+  points  Int @default(1)
+  // Optional explanation shown in review mode.
+  explanation String?
   // JSON-encoded options + correct answer index.
   options String
+  // Correct option index for SINGLE / TRUE_FALSE.
   answer  Int
+  // JSON-encoded array of correct option indices for MULTI questions.
+  correct String?
 
   quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
 
@@ -837,17 +1014,48 @@ model QuizAttempt {
   userId    String
   score     Int      @default(0)
   passed    Boolean  @default(false)
+  // JSON-encoded array of selected option indices, one per question (review).
+  answers   String?
+  // How long the learner took, in seconds.
+  timeTakenSec Int?
   createdAt DateTime @default(now())
 
   quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id])
 }
 
+model LessonCompletion {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  courseId  String
+  progress  Float    @default(1)
+  // Last playback position in seconds, so a video lesson can resume where the
+  // learner left off (independent of completion progress).
+  positionSec Int?
+  // Timestamp the lesson first reached full completion (progress >= 1). Drives
+  // time-gated ("drip") unlocking of the next lesson / module.
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+}
+
 model Assignment {
   id          String   @id @default(cuid())
   courseId    String
+  // Optional 1:1 link to an ASSIGNMENT-type lesson. The assignment task, its
+  // reference attachments and the submission flow all hang off this lesson.
+  lessonId    String?  @unique
   title       String
+  // Rich task description / instructions (markdown). Shown on the Details tab.
   description String?
+  // JSON-encoded array of instructor reference files: [{ key, name, size }].
+  // Shown on the Attachments tab of the assignment.
+  attachments String?
   dueAt       DateTime?
 
   course      Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
@@ -858,10 +1066,17 @@ model AssignmentSubmission {
   id           String   @id @default(cuid())
   assignmentId String
   userId       String
+  // The learner's typed answer ("Your answer" textarea).
+  answerText   String?
+  // JSON-encoded array of submitted files: [{ key, name, size }].
+  attachments  String?
+  // Legacy single-file key (kept for backward compatibility).
   contentKey   String?
+  status       SubmissionStatus @default(UNDER_REVIEW)
   grade        Int?
   feedback     String?
   submittedAt  DateTime @default(now())
+  reviewedAt   DateTime?
 
   assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id])
@@ -878,4 +1093,67 @@ model Certificate {
 
   user   User   @relation(fields: [userId], references: [id])
   course Course @relation(fields: [courseId], references: [id])
+}
+
+// A learner's star rating + optional written review of a course. One review per
+// learner per course (upsert on change).
+model CourseReview {
+  id        String   @id @default(cuid())
+  courseId  String
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([courseId, userId])
+}
+
+// A private personal note a learner takes on a lesson, optionally anchored to a
+// video timestamp. Visible only to its author.
+model LessonNote {
+  id          String   @id @default(cuid())
+  userId      String
+  lessonId    String
+  courseId    String
+  body        String
+  positionSec Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id])
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+}
+
+// A public question asked on a lesson (course Q&A). Instructors/admins or peers
+// answer; the author or an admin can mark it resolved.
+model LessonQuestion {
+  id        String   @id @default(cuid())
+  lessonId  String
+  courseId  String
+  userId    String
+  body      String
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lesson  Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id])
+  answers LessonAnswer[]
+}
+
+model LessonAnswer {
+  id           String   @id @default(cuid())
+  questionId   String
+  userId       String
+  body         String
+  // True when the responder is an instructor/admin (badge in the UI).
+  isInstructor Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  question LessonQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user     User           @relation(fields: [userId], references: [id])
 }

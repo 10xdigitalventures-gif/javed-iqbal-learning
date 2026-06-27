@@ -7,6 +7,12 @@ import { Role } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateUserDto, UpdateUserDto } from "./dto";
+import {
+  Paginated,
+  parsePagination,
+  buildOrderBy,
+  searchOr,
+} from "../common/list-query";
 
 const PUBLIC_SELECT = {
   id: true,
@@ -32,6 +38,47 @@ export class UsersService {
       select: PUBLIC_SELECT,
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  // Paginated, searchable, sortable list for admin tables.
+  async listPaged(opts: {
+    role?: Role;
+    q?: string;
+    status?: string; // "active" | "inactive"
+    page?: string | number;
+    pageSize?: string | number;
+    sort?: string;
+    order?: string;
+  }): Promise<Paginated<any>> {
+    const where: any = {};
+    if (opts.role) where.role = opts.role;
+    if (opts.status === "active") where.isActive = true;
+    if (opts.status === "inactive") where.isActive = false;
+    const search = searchOr(opts.q, ["name", "email", "phone"]);
+    if (search) Object.assign(where, search);
+
+    const orderBy = buildOrderBy(
+      opts.sort,
+      opts.order,
+      { name: "name", email: "email", createdAt: "createdAt" },
+      { createdAt: "desc" },
+    );
+    const { page, pageSize, skip, take } = parsePagination(
+      opts.page,
+      opts.pageSize,
+    );
+
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: PUBLIC_SELECT,
+        orderBy,
+        skip,
+        take,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+    return { rows, total, page, pageSize };
   }
 
   async get(id: string) {

@@ -35,6 +35,13 @@ export class LibraryController {
     return this.service.continueReading(user.userId);
   }
 
+  // Audiobooks the listener has started but not finished — powers
+  // "Continue listening".
+  @Get("listening")
+  continueListening(@CurrentUser() user: AuthUser) {
+    return this.service.continueListening(user.userId);
+  }
+
   @Get("offline")
   offline(@CurrentUser() user: AuthUser) {
     return this.service.listOffline(user.userId);

@@ -20,13 +20,18 @@ export default function MyLearningScreen() {
   const nav = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
-    api("/library")
-      .then((d: any) => setItems(arr(d)))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
+    Promise.all([
+      api("/library")
+        .then((d: any) => setItems(arr(d)))
+        .catch(() => setItems([])),
+      api("/courses/me/enrolled")
+        .then((d: any) => setCourses(arr(d)))
+        .catch(() => setCourses([])),
+    ]).finally(() => setLoading(false));
   }, []);
 
   useFocusEffect(load);
@@ -70,6 +75,38 @@ export default function MyLearningScreen() {
           <Text style={s.statLabel}>Read time</Text>
         </View>
       </View>
+
+      {courses.length ? (
+        <>
+          <SectionHeader title="My courses" />
+          {courses.map((en: any) => {
+            const c = en.course || en;
+            const pct = en.percentComplete || 0;
+            return (
+              <TouchableOpacity
+                key={"course" + (en.id || c.id)}
+                style={s.row}
+                activeOpacity={0.85}
+                onPress={() => nav.navigate("CourseDetail", { idOrSlug: c.id })}
+              >
+                <BookCover url={c.coverUrl} title={c.title} size="sm" />
+                <View style={s.rowBody}>
+                  <Text style={s.rowTitle} numberOfLines={2}>
+                    {c.title}
+                  </Text>
+                  <Text style={s.rowMeta}>
+                    {Math.round(pct)}% complete
+                    {c._count?.lessons
+                      ? " \u00b7 " + c._count.lessons + " lessons"
+                      : ""}
+                  </Text>
+                  <ProgressBar value={pct} />
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </>
+      ) : null}
 
       {withProgress.length ? (
         <>

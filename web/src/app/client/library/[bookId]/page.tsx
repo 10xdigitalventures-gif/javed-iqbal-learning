@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, Spinner, Button, ErrorText } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
 import { ChevronLeft } from "lucide-react";
 
 type ChapterRef = { id: string; index: number; title: string };
@@ -23,6 +24,8 @@ export default function ReaderPage() {
   const [data, setData] = useState<SecureContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const watermark = user?.email || user?.name || "Protected content";
 
   const load = useCallback(
     (chapterId?: string) => {
@@ -90,11 +93,16 @@ export default function ReaderPage() {
               ) : null}
             </div>
           </Card>
-          <Card>
-            <h1 className="mb-4 text-xl font-bold text-slate-950">
+          <Card className="relative overflow-hidden">
+            <ReaderWatermark text={watermark} />
+            <h1 className="relative z-10 mb-4 text-xl font-bold text-slate-950">
               {data.chapterTitle}
             </h1>
-            <article className="prose prose-slate max-w-none whitespace-pre-wrap text-[15px] leading-7 text-slate-800">
+            <article
+              onContextMenu={(e) => e.preventDefault()}
+              onCopy={(e) => e.preventDefault()}
+              className="prose prose-slate relative z-10 max-w-none select-none whitespace-pre-wrap text-[15px] leading-7 text-slate-800 print:hidden"
+            >
               {data.content}
             </article>
             {data.chapters.length > 1 ? (
@@ -127,6 +135,26 @@ export default function ReaderPage() {
           </Card>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// Faint diagonal watermark stamped with the reader's identity, discouraging
+// screenshots / redistribution of protected book content.
+function ReaderWatermark({ text }: { text: string }) {
+  const rows = Array.from({ length: 9 });
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0 flex flex-col justify-between overflow-hidden opacity-[0.06]">
+      {rows.map((_, r) => (
+        <div
+          key={r}
+          className="flex -rotate-12 justify-around whitespace-nowrap text-[13px] font-semibold text-slate-900"
+        >
+          <span>{text}</span>
+          <span>{text}</span>
+          <span>{text}</span>
+        </div>
+      ))}
     </div>
   );
 }

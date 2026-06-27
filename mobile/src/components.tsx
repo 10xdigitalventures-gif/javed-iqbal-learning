@@ -121,6 +121,11 @@ const GATEWAY_META: Record<
     sub: "Development sandbox",
     icon: "flask-outline",
   },
+  bank_transfer: {
+    label: "Bank transfer",
+    sub: "Direct deposit \u2022 manual verification",
+    icon: "business-outline",
+  },
 };
 
 // Bottom-sheet style picker that lets the user choose a payment gateway

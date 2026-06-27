@@ -3,6 +3,7 @@ import { PaymentProvider } from "./providers/payment-provider.interface";
 import { MockProvider } from "./providers/mock.provider";
 import { GoPayFastProvider } from "./providers/gopayfast.provider";
 import { WhopProvider } from "./providers/whop.provider";
+import { BankTransferProvider } from "./providers/bank-transfer.provider";
 
 // Central registry of payment providers. Which providers are "active" is driven
 // by the PAYMENT_PROVIDERS env var (comma-separated keys). The mock provider is
@@ -16,9 +17,10 @@ export class PaymentProvidersService {
     mock: MockProvider,
     gopayfast: GoPayFastProvider,
     whop: WhopProvider,
+    bankTransfer: BankTransferProvider,
   ) {
     this.providers = new Map(
-      [mock, gopayfast, whop].map((p) => [p.name, p]),
+      [mock, gopayfast, whop, bankTransfer].map((p) => [p.name, p]),
     );
   }
 
@@ -33,6 +35,12 @@ export class PaymentProvidersService {
       const p = this.providers.get(name);
       return p && p.isEnabled();
     });
+    // Always offer manual bank transfer when it is enabled, independent of the
+    // configured online gateways, so buyers can always pay offline.
+    const bank = this.providers.get("bank_transfer");
+    if (bank && bank.isEnabled() && !enabled.includes("bank_transfer")) {
+      enabled.push("bank_transfer");
+    }
     // Fall back to the mock provider so checkout always works in development.
     return enabled.length > 0 ? enabled : ["mock"];
   }

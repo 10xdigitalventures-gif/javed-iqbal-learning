@@ -8,20 +8,45 @@ import {
   Card,
   ErrorText,
   Input,
+  Select,
   Spinner,
 } from "@/components/ui";
+import {
+  Pager,
+  buildQuery,
+  useDebounced,
+  type Paged,
+} from "@/components/list-controls";
 import { PageHeader } from "@/components/shell";
 import type { User } from "@/lib/types";
 
 export default function AdminClients() {
-  const [list, setList] = useState<User[] | null>(null);
+  const [data, setData] = useState<Paged<User> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
 
+  // Search / filter / sort / pagination state.
+  const [q, setQ] = useState("");
+  const debouncedQ = useDebounced(q);
+  const [status, setStatus] = useState("");
+  const [sort, setSort] = useState("createdAt");
+  const [order, setOrder] = useState("desc");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
   async function load() {
     try {
-      setList(await api<User[]>("/users?role=CLIENT"));
+      const query = buildQuery({
+        role: "CLIENT",
+        q: debouncedQ,
+        status,
+        sort,
+        order,
+        page,
+        pageSize,
+      });
+      setData(await api<Paged<User>>(`/users/paged${query}`));
     } catch (err: any) {
       setError(err.message);
     }
@@ -29,7 +54,13 @@ export default function AdminClients() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ, status, sort, order, page]);
+
+  // Reset to first page whenever filters change.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQ, status, sort, order]);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -54,7 +85,7 @@ export default function AdminClients() {
     load();
   }
 
-  if (!list) return <Spinner />;
+  const list = data?.rows ?? null;
 
   return (
     <div>
@@ -93,26 +124,85 @@ export default function AdminClients() {
           </form>
         </Card>
       ) : null}
-      <div className="space-y-2">
-        {list.map((u) => (
-          <Card key={u.id}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">{u.name}</p>
-                <p className="text-sm text-slate-500">{u.email}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <Badge color={u.isActive ? "green" : "red"}>
-                  {u.isActive ? "Active" : "Inactive"}
-                </Badge>
-                <Button variant="outline" onClick={() => toggle(u)}>
-                  {u.isActive ? "Deactivate" : "Activate"}
-                </Button>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+
+      <Card className="mb-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Input
+            label="Search"
+            placeholder="Name, email or phone"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <Select
+            label="Status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </Select>
+          <Select
+            label="Sort by"
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+          >
+            <option value="createdAt">Date joined</option>
+            <option value="name">Name</option>
+            <option value="email">Email</option>
+          </Select>
+          <Select
+            label="Order"
+            value={order}
+            onChange={(e) => setOrder(e.target.value)}
+          >
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </Select>
+        </div>
+      </Card>
+
+      {!list ? (
+        <Spinner />
+      ) : (
+        <>
+          <div className="space-y-2">
+            {list.map((u) => (
+              <Card key={u.id}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{u.name}</p>
+                    <p className="text-sm text-slate-500">{u.email}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge color={u.isActive ? "green" : "red"}>
+                      {u.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                    <Button variant="outline" onClick={() => toggle(u)}>
+                      {u.isActive ? "Deactivate" : "Activate"}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+            {list.length === 0 ? (
+              <Card>
+                <p className="py-6 text-center text-slate-400">
+                  No clients match your filters
+                </p>
+              </Card>
+            ) : null}
+          </div>
+          {data ? (
+            <Pager
+              page={data.page}
+              pageSize={data.pageSize}
+              total={data.total}
+              onPage={setPage}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

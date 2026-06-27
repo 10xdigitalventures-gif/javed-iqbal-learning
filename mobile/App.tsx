@@ -4,6 +4,10 @@ import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { AuthProvider, useAuth } from "./src/auth";
 import { Loading } from "./src/components";
@@ -16,15 +20,18 @@ import LibraryScreen from "./src/screens/LibraryScreen";
 import CommunityScreen from "./src/screens/CommunityScreen";
 import MessagesScreen from "./src/screens/MessagesScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
+import NotificationSettingsScreen from "./src/screens/NotificationSettingsScreen";
 import BookDetailScreen from "./src/screens/BookDetailScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
 import AudioBooksScreen from "./src/screens/AudioBooksScreen";
 import CheckoutScreen from "./src/screens/CheckoutScreen";
 import HardCopyOrderScreen from "./src/screens/HardCopyOrderScreen";
+import BankTransferScreen from "./src/screens/BankTransferScreen";
 import ChatScreen from "./src/screens/ChatScreen";
 import LoginScreen from "./src/screens/LoginScreen";
 
 import CoursesScreen from "./src/screens/CoursesScreen";
+import CertificatesScreen from "./src/screens/CertificatesScreen";
 import CourseDetailScreen from "./src/screens/CourseDetailScreen";
 import LessonDetailScreen from "./src/screens/LessonDetailScreen";
 import QuizDetailScreen from "./src/screens/QuizDetailScreen";
@@ -44,6 +51,7 @@ const audioBooksOpts = { ...brandHeader, title: "Audio Books" } as const;
 const checkoutOpts = { title: "Checkout" } as const;
 const hardCopyOpts = { title: "Order hard copy" } as const;
 const coursesOpts = { ...brandHeader, title: "Courses" } as const;
+const certificatesOpts = { ...brandHeader, title: "My Certificates" } as const;
 
 const TAB_ICONS: Record<string, string> = {
   Home: "home",
@@ -55,6 +63,13 @@ const TAB_ICONS: Record<string, string> = {
 };
 
 function Tabs() {
+  // Add the device's bottom safe-area inset (home indicator / gesture bar) so
+  // the tab bar is never clipped and the tabs stay comfortably tappable.
+  const insets = useSafeAreaInsets();
+  // Always keep a comfortable gap below the tabs on top of the device's bottom
+  // safe-area inset, so tabs are never clipped and stay easy to tap on phones
+  // both with and without a gesture bar.
+  const bottomInset = Math.max(insets.bottom, 36) + 22;
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -65,11 +80,12 @@ function Tabs() {
         tabBarInactiveTintColor: colors.muted,
         tabBarStyle: {
           borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 6,
+          height: 64 + bottomInset,
+          paddingBottom: bottomInset,
+          paddingTop: 10,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarItemStyle: { paddingVertical: 4 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600", marginBottom: 6 },
         tabBarIcon: ({ color, size, focused }) => {
           const base = TAB_ICONS[route.name] || "ellipse";
           const name = focused ? base : base + "-outline";
@@ -131,7 +147,22 @@ function Root() {
             component={HardCopyOrderScreen}
             options={hardCopyOpts}
           />
+          <Stack.Screen
+            name="BankTransfer"
+            component={BankTransferScreen}
+            options={{ title: "Bank transfer" } as any}
+          />
           <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen
+            name="NotificationSettings"
+            component={NotificationSettingsScreen}
+            options={{ title: "Notifications" } as any}
+          />
+          <Stack.Screen
+            name="Certificates"
+            component={CertificatesScreen}
+            options={certificatesOpts}
+          />
           <Stack.Screen
             name="Courses"
             component={CoursesScreen as any}
@@ -162,11 +193,13 @@ function Root() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <NavigationContainer>
-        <StatusBar style="dark" />
-        <Root />
-      </NavigationContainer>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NavigationContainer>
+          <StatusBar style="dark" />
+          <Root />
+        </NavigationContainer>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

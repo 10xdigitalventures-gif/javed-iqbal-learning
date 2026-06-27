@@ -12,6 +12,7 @@ import {
   SubscriptionStatus,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
 import { CreateOrderDto } from "./dto";
 
 // Commerce for digital products (books, bundles, subscription plans). Creates a
@@ -77,11 +78,39 @@ export class OrdersService {
         where: { userId_courseId: { userId, courseId: course.id } },
       });
       if (existing)
-        throw new BadRequestException("You are already enrolled in this course");
+        throw new BadRequestException(
+          "You are already enrolled in this course",
+        );
       amount = course.price;
       currency = course.currency;
       itemName = course.title;
       data.courseId = course.id;
+    } else if (dto.kind === LearningProductKind.COMMUNITY) {
+      if (!dto.communityId)
+        throw new BadRequestException("communityId is required");
+      const community = await this.prisma.community.findUnique({
+        where: { id: dto.communityId },
+      });
+      if (!community || !community.isActive)
+        throw new NotFoundException("Community not available");
+      if (!community.isPaid)
+        throw new BadRequestException("This community is free to join");
+      const member = await this.prisma.communityMember.findUnique({
+        where: {
+          communityId_userId: {
+            communityId: community.id,
+            userId,
+          },
+        },
+      });
+      if (member)
+        throw new BadRequestException(
+          "You are already a member of this community",
+        );
+      amount = community.price;
+      currency = community.currency;
+      itemName = community.name;
+      data.communityId = community.id;
     } else {
       throw new BadRequestException("Unsupported order kind");
     }
@@ -107,6 +136,46 @@ export class OrdersService {
     });
 
     return { order, payment, itemName };
+  }
+
+  // Create a subscription order with an explicit amount (used for prorated plan
+  // changes and renewals). Always charged in the plan's own currency.
+  async createSubscriptionOrder(
+    userId: string,
+    planId: string,
+    opts?: { amount?: number },
+  ) {
+    const plan = await this.prisma.subscriptionPlan.findUnique({
+      where: { id: planId },
+    });
+    if (!plan || !plan.isActive)
+      throw new NotFoundException("Plan not available");
+    const amount =
+      opts?.amount != null ? Math.max(0, Math.round(opts.amount)) : plan.price;
+    const currency = plan.currency;
+    const order = await this.prisma.order.create({
+      data: {
+        userId,
+        kind: LearningProductKind.SUBSCRIPTION,
+        status: OrderStatus.PENDING,
+        planId: plan.id,
+        amount,
+        currency,
+      },
+    });
+    const payment = await this.prisma.payment.create({
+      data: {
+        userId,
+        orderId: order.id,
+        amount,
+        currency,
+        gateway: this.defaultGateway(),
+        kind: PaymentKind.SUBSCRIPTION,
+        status: PaymentStatus.PENDING,
+        invoiceNo: this.invoiceNo(),
+      },
+    });
+    return { order, payment, itemName: plan.name };
   }
 
   // Grant access for a paid order. Idempotent — safe to call from a webhook that
@@ -148,6 +217,20 @@ export class OrdersService {
         create: { userId: order.userId, courseId: order.courseId },
         update: {},
       });
+    } else if (
+      order.kind === LearningProductKind.COMMUNITY &&
+      order.communityId
+    ) {
+      await this.prisma.communityMember.upsert({
+        where: {
+          communityId_userId: {
+            communityId: order.communityId,
+            userId: order.userId,
+          },
+        },
+        create: { communityId: order.communityId, userId: order.userId },
+        update: {},
+      });
     }
 
     return this.prisma.order.update({
@@ -170,15 +253,53 @@ export class OrdersService {
       where: { id: planId },
     });
     if (!plan) return;
-    const expiresAt = plan.durationDays
-      ? new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000)
-      : null; // null = lifetime
+    const now = Date.now();
+    const durationMs = plan.durationDays
+      ? plan.durationDays * 24 * 60 * 60 * 1000
+      : null;
+
+    // Most recent active subscription for this user, if any.
+    const existing = await this.prisma.subscription.findFirst({
+      where: { userId, status: SubscriptionStatus.ACTIVE },
+      orderBy: { startedAt: "desc" },
+    });
+
+    // Renewal of the SAME plan: extend from the later of now / current expiry
+    // and clear any dunning state.
+    if (existing && existing.planId === planId && durationMs != null) {
+      const base =
+        existing.expiresAt && existing.expiresAt.getTime() > now
+          ? existing.expiresAt.getTime()
+          : now;
+      await this.prisma.subscription.update({
+        where: { id: existing.id },
+        data: {
+          expiresAt: new Date(base + durationMs),
+          autoRenew: true,
+          renewAttempts: 0,
+          lastReminderAt: null,
+          graceUntil: null,
+          pendingOrderId: null,
+        },
+      });
+      return;
+    }
+
+    // Switching to a different plan: supersede the old subscription.
+    if (existing && existing.planId !== planId) {
+      await this.prisma.subscription.update({
+        where: { id: existing.id },
+        data: { status: SubscriptionStatus.CANCELLED, autoRenew: false },
+      });
+    }
+
+    const expiresAt = durationMs != null ? new Date(now + durationMs) : null;
     await this.prisma.subscription.create({
       data: {
         userId,
         planId,
         status: SubscriptionStatus.ACTIVE,
-        autoRenew: plan.durationDays != null,
+        autoRenew: durationMs != null,
         expiresAt,
       },
     });
@@ -202,6 +323,59 @@ export class OrdersService {
       },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  // Paginated / searchable / sortable list for the admin orders table.
+  async listAllPaged(opts: {
+    q?: string;
+    status?: string;
+    kind?: string;
+    page?: string | number;
+    pageSize?: string | number;
+    sort?: string;
+    order?: string;
+  }): Promise<Paginated<any>> {
+    const where: any = {};
+    if (opts.status) where.status = opts.status;
+    if (opts.kind) where.kind = opts.kind;
+    const term = (opts.q || "").trim();
+    if (term) {
+      where.OR = [
+        { user: { name: { contains: term, mode: "insensitive" } } },
+        { user: { email: { contains: term, mode: "insensitive" } } },
+        { book: { title: { contains: term, mode: "insensitive" } } },
+        { bundle: { title: { contains: term, mode: "insensitive" } } },
+        { plan: { name: { contains: term, mode: "insensitive" } } },
+      ];
+    }
+
+    const orderBy = buildOrderBy(
+      opts.sort,
+      opts.order,
+      { amount: "amount", status: "status", createdAt: "createdAt" },
+      { createdAt: "desc" },
+    );
+    const { page, pageSize, skip, take } = parsePagination(
+      opts.page,
+      opts.pageSize,
+    );
+
+    const [rows, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          book: { select: { id: true, title: true } },
+          bundle: { select: { id: true, title: true } },
+          plan: { select: { id: true, name: true } },
+        },
+        orderBy,
+        skip,
+        take,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+    return { rows, total, page, pageSize };
   }
 
   async get(id: string) {

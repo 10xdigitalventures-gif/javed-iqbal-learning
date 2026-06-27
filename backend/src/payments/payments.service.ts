@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { PaymentStatus } from "@prisma/client";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { PaymentStatus, Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
 import { PurchasesService } from "../purchases/purchases.service";
 import { OrdersService } from "../orders/orders.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -52,7 +58,9 @@ export class PaymentsService {
       include: {
         user: true,
         purchase: { include: { package: true } },
-        order: { include: { book: true, bundle: true, plan: true } },
+        order: {
+          include: { book: true, bundle: true, plan: true, course: true },
+        },
       },
     });
     if (!payment) throw new NotFoundException("Payment not found");
@@ -70,6 +78,7 @@ export class PaymentsService {
         payment.order?.book?.title ||
         payment.order?.bundle?.title ||
         payment.order?.plan?.name ||
+        payment.order?.course?.title ||
         payment.purchase?.package?.name ||
         "Consultation",
       customerEmail: payment.user.email,
@@ -143,6 +152,102 @@ export class PaymentsService {
     return { ok: true, status: result.status };
   }
 
+  // ---- Manual offline bank transfer ----------------------------------------
+
+  // Bank account details shown on the manual transfer screen. Configurable via
+  // env so the account can change without a code deploy.
+  bankDetails() {
+    return {
+      bankName: process.env.BANK_NAME || "UBL (United Bank Limited)",
+      accountTitle: process.env.BANK_ACCOUNT_TITLE || "TALIB E QURAN",
+      accountNumber: process.env.BANK_ACCOUNT_NUMBER || "0350288676115",
+      iban: process.env.BANK_IBAN || "PK20UNIL0109000288676115",
+      instructions:
+        process.env.BANK_INSTRUCTIONS ||
+        "Transfer the exact amount to the account above, then upload your receipt and enter the transaction id. Your access is activated once we verify the payment (usually within a few hours).",
+    };
+  }
+
+  // A buyer reports that they paid by offline bank transfer. We attach their
+  // proof to the (still PENDING) payment and alert admins to verify it.
+  async submitBankTransfer(
+    userId: string,
+    paymentId: string,
+    dto: {
+      proofKey?: string;
+      senderName?: string;
+      senderRef?: string;
+      note?: string;
+    },
+  ) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { user: true },
+    });
+    if (!payment) throw new NotFoundException("Payment not found");
+    if (payment.userId !== userId)
+      throw new ForbiddenException("This payment belongs to someone else");
+    if (payment.status === PaymentStatus.PAID)
+      throw new BadRequestException("This payment is already confirmed");
+    if (!dto.proofKey && !dto.senderRef)
+      throw new BadRequestException(
+        "Please upload a receipt or enter the transaction id",
+      );
+
+    const updated = await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        gateway: "bank_transfer",
+        proofKey: dto.proofKey || null,
+        senderName: dto.senderName || null,
+        senderRef: dto.senderRef || null,
+        manualNote: dto.note || null,
+      },
+    });
+
+    // Notify every admin that a transfer is awaiting verification.
+    const admins = await this.prisma.user.findMany({
+      where: { role: Role.ADMIN },
+      select: { id: true },
+    });
+    for (const admin of admins) {
+      await this.notifications.create(admin.id, {
+        type: "BANK_TRANSFER_REVIEW",
+        title: "Bank transfer to verify",
+        body:
+          (payment.user?.name || "A buyer") +
+          " submitted a bank transfer of " +
+          payment.currency +
+          " " +
+          payment.amount +
+          ". Review and confirm it in payments.",
+        email: true,
+      });
+    }
+
+    return { ok: true, status: "PENDING_REVIEW", payment: updated };
+  }
+
+  // Admin confirms a verified bank transfer; reuses markPaid so the order is
+  // fulfilled and the buyer notified exactly like an online payment.
+  async verifyManual(paymentId: string, reference?: string) {
+    return this.markPaid(paymentId, reference || "BANK-" + Date.now());
+  }
+
+  // Admin rejects a bank transfer that could not be verified.
+  async rejectManual(paymentId: string, reason?: string) {
+    const payment = await this.markFailed(paymentId, reason);
+    await this.notifications.create(payment.userId, {
+      type: "BANK_TRANSFER_REJECTED",
+      title: "Bank transfer not verified",
+      body:
+        reason ||
+        "We could not verify your bank transfer. Please check the details and try again, or contact support.",
+      email: true,
+    });
+    return payment;
+  }
+
   listForUser(userId: string) {
     return this.prisma.payment.findMany({
       where: { userId },
@@ -159,5 +264,63 @@ export class PaymentsService {
       },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  // Paginated / searchable / sortable list for the admin payments table.
+  async listAllPaged(opts: {
+    q?: string;
+    status?: string;
+    gateway?: string;
+    kind?: string;
+    channel?: string; // "online" (gateway) | "bank" (manual bank transfer)
+    page?: string | number;
+    pageSize?: string | number;
+    sort?: string;
+    order?: string;
+  }): Promise<Paginated<any>> {
+    // Manual / non-gateway payment methods (reviewed by hand, not via a PSP).
+    const MANUAL_GATEWAYS = ["bank_transfer", "manual", "cash"];
+    const where: any = {};
+    if (opts.status) where.status = opts.status;
+    if (opts.gateway) where.gateway = opts.gateway;
+    if (opts.kind) where.kind = opts.kind;
+    if (opts.channel === "online") where.gateway = { notIn: MANUAL_GATEWAYS };
+    if (opts.channel === "bank") where.gateway = "bank_transfer";
+    const term = (opts.q || "").trim();
+    if (term) {
+      where.OR = [
+        { invoiceNo: { contains: term, mode: "insensitive" } },
+        { senderName: { contains: term, mode: "insensitive" } },
+        { senderRef: { contains: term, mode: "insensitive" } },
+        { user: { name: { contains: term, mode: "insensitive" } } },
+        { user: { email: { contains: term, mode: "insensitive" } } },
+      ];
+    }
+
+    const orderBy = buildOrderBy(
+      opts.sort,
+      opts.order,
+      { amount: "amount", status: "status", createdAt: "createdAt" },
+      { createdAt: "desc" },
+    );
+    const { page, pageSize, skip, take } = parsePagination(
+      opts.page,
+      opts.pageSize,
+    );
+
+    const [rows, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          purchase: { include: { package: true } },
+        },
+        orderBy,
+        skip,
+        take,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+    return { rows, total, page, pageSize };
   }
 }

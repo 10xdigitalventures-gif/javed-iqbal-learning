@@ -15,6 +15,9 @@ export class UpdateProgressDto {
   @IsOptional() @IsInt() @Min(0) chaptersCompleted?: number;
   // Incremental reading time (seconds) to add to the running total.
   @IsOptional() @IsInt() @Min(0) addReadingSeconds?: number;
+  // Audiobook playback resume state: chapter id + offset within it (seconds).
+  @IsOptional() @IsString() lastAudioChapterId?: string;
+  @IsOptional() @IsInt() @Min(0) lastAudioPositionSec?: number;
   @IsOptional() @IsBoolean() isCompleted?: boolean;
 }
 

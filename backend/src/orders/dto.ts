@@ -22,4 +22,8 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   courseId?: string;
+
+  @IsOptional()
+  @IsString()
+  communityId?: string;
 }

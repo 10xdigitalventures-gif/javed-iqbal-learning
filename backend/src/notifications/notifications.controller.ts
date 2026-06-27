@@ -1,11 +1,14 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from "@nestjs/common";
 import { NotificationsService } from "./notifications.service";
+import { UpdatePreferenceDto } from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser, AuthUser } from "../auth/current-user.decorator";
 
@@ -22,6 +25,26 @@ export class NotificationsController {
   @Get("unread-count")
   unread(@CurrentUser() user: AuthUser) {
     return this.service.unreadCount(user.userId);
+  }
+
+  // Per-user delivery preferences.
+  @Get("preferences")
+  getPreferences(@CurrentUser() user: AuthUser) {
+    return this.service.getPreference(user.userId);
+  }
+
+  @Patch("preferences")
+  updatePreferences(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdatePreferenceDto,
+  ) {
+    return this.service.updatePreference(user.userId, dto);
+  }
+
+  // Fire a test notification across the user's enabled channels.
+  @Post("test")
+  test(@CurrentUser() user: AuthUser) {
+    return this.service.sendTest(user.userId);
   }
 
   @Post(":id/read")

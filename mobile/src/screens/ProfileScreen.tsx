@@ -52,6 +52,24 @@ export default function ProfileScreen() {
     }
   }
 
+  const [renewing, setRenewing] = useState(false);
+  async function renewNow() {
+    try {
+      setRenewing(true);
+      const res: any = await api("/subscriptions/me/renew", { method: "POST" });
+      nav.navigate("Checkout", {
+        paymentId: res.payment.id,
+        title: "Renew " + (res.itemName || "subscription"),
+        amount: res.payment.amount,
+        currency: res.payment.currency,
+      });
+    } catch (e: any) {
+      Alert.alert("Renew", e?.message || "Could not start renewal right now.");
+    } finally {
+      setRenewing(false);
+    }
+  }
+
   function confirmLogout() {
     Alert.alert("Log out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
@@ -69,6 +87,18 @@ export default function ProfileScreen() {
   const isAdmin = user?.role === "ADMIN";
 
   const accountRows: Row[] = [
+    {
+      icon: "ribbon-outline",
+      label: "My certificates",
+      hint: "View and share certificates you've earned",
+      onPress: () => nav.navigate("Certificates", {}),
+    },
+    {
+      icon: "notifications-outline",
+      label: "Notifications",
+      hint: "Choose how you get alerts (email, SMS, WhatsApp, push)",
+      onPress: () => nav.navigate("NotificationSettings", {}),
+    },
     {
       icon: "cube-outline",
       label: "Hard copy orders",
@@ -122,6 +152,18 @@ export default function ProfileScreen() {
             </Text>
           </View>
         </View>
+        {sub && sub.expiresAt ? (
+          <TouchableOpacity
+            style={s.renewBtn}
+            onPress={renewNow}
+            disabled={renewing}
+          >
+            <Ionicons name="refresh" size={15} color={colors.black} />
+            <Text style={s.renewText}>
+              {renewing ? "Please wait…" : "Renew"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <Text style={s.section}>Account</Text>
@@ -215,8 +257,22 @@ const s = StyleSheet.create({
     borderColor: colors.border,
     padding: 16,
     marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
-  subLeft: { flexDirection: "row", alignItems: "center" },
+  subLeft: { flexDirection: "row", alignItems: "center", flex: 1 },
+  renewBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.brand,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  renewText: { color: colors.black, fontWeight: "700", fontSize: 13 },
   subInfo: { flex: 1, marginLeft: 12 },
   subTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   subSub: { fontSize: 12, color: colors.muted, marginTop: 2 },

@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -31,7 +32,34 @@ export class SendMessageDto {
   @IsString()
   mediaUrl?: string;
 
+  // Original file name for IMAGE / FILE attachments (shown in the UI).
+  @IsOptional()
+  @IsString()
+  fileName?: string;
+
   @IsOptional()
   @IsInt()
   durationSec?: number;
+
+  // When set, this message is a reply to an earlier message in the same
+  // conversation.
+  @IsOptional()
+  @IsString()
+  replyToId?: string;
+}
+
+export class EditMessageDto {
+  @IsString()
+  body: string;
+}
+
+export class ReactDto {
+  @IsString()
+  emoji: string;
+}
+
+export class TypingDto {
+  @IsOptional()
+  @IsBoolean()
+  typing?: boolean;
 }

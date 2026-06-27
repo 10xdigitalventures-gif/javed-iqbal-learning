@@ -3,21 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { Card, Spinner, Badge, Button, Input, ErrorText } from "@/components/ui";
+import { Card, Spinner, Button, ErrorText } from "@/components/ui";
 import { PageHeader } from "@/components/shell";
-import { BookOpen } from "lucide-react";
+import { BookOpen, GraduationCap, PlayCircle } from "lucide-react";
 
 type Book = {
   id: string;
   title: string;
-  slug: string;
   author: string;
-  description?: string;
   coverUrl?: string;
-  price: number;
-  currency: string;
-  pageCount?: number;
-  category?: { id: string; name: string } | null;
 };
 
 type Entitlement = {
@@ -26,101 +20,173 @@ type Entitlement = {
   progress?: { percentComplete: number; isCompleted: boolean } | null;
 };
 
-function Cover({ book }: { book: Book }) {
-  if (book.coverUrl) {
+type Course = {
+  id: string;
+  title: string;
+  coverUrl?: string;
+};
+
+type Enrollment = {
+  courseId: string;
+  percentComplete?: number;
+  course?: Course;
+};
+
+const TABS = [
+  { id: "novels", label: "Novels" },
+  { id: "courses", label: "Courses" },
+] as const;
+
+function Cover({ url, kind }: { url?: string; kind: "book" | "course" }) {
+  const Icon = kind === "course" ? GraduationCap : BookOpen;
+  if (url) {
     // eslint-disable-next-line @next/next/no-img-element
     return (
       <img
-        src={book.coverUrl}
-        alt={book.title}
-        className="h-40 w-full rounded-lg object-cover"
+        src={url}
+        alt=""
+        className="aspect-[3/4] w-full rounded-xl object-cover"
       />
     );
   }
   return (
-    <div className="flex h-40 w-full items-center justify-center rounded-lg bg-brand-light text-brand">
-      <BookOpen className="h-10 w-10" aria-hidden="true" />
+    <div className="flex aspect-[3/4] w-full items-center justify-center rounded-xl bg-brand-light text-brand">
+      <Icon className="h-10 w-10" aria-hidden="true" />
+    </div>
+  );
+}
+
+function ProgressBar({ percent }: { percent: number }) {
+  return (
+    <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100">
+      <div
+        className="h-1.5 rounded-full bg-brand"
+        style={{ width: Math.min(100, Math.max(0, percent)) + "%" }}
+      />
     </div>
   );
 }
 
 export default function LibraryPage() {
-  const [tab, setTab] = useState<"mine" | "browse">("mine");
-  const [mine, setMine] = useState<Entitlement[] | null>(null);
-  const [catalog, setCatalog] = useState<Book[] | null>(null);
-  const [q, setQ] = useState("");
+  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("novels");
+  const [books, setBooks] = useState<Entitlement[] | null>(null);
+  const [courses, setCourses] = useState<Enrollment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api<Entitlement[]>("/library")
-      .then(setMine)
+      .then(setBooks)
       .catch((e) => setError(e.message));
-    api<Book[]>("/books")
-      .then(setCatalog)
-      .catch((e) => setError(e.message));
+    api<Enrollment[]>("/courses/me/enrolled")
+      .then(setCourses)
+      .catch(() => setCourses([]));
   }, []);
 
-  const ownedIds = new Set((mine ?? []).map((e) => e.bookId));
-  const filtered = (catalog ?? []).filter((b) =>
-    q ? b.title.toLowerCase().includes(q.toLowerCase()) : true,
+  // "Continue reading / learning" — only items that are in progress.
+  const continueBooks = (books ?? []).filter(
+    (e) => (e.progress?.percentComplete ?? 0) > 0 && !e.progress?.isCompleted,
   );
+  const continueCourses = (courses ?? []).filter(
+    (e) => (e.percentComplete ?? 0) > 0 && (e.percentComplete ?? 0) < 100,
+  );
+  const continueItems =
+    tab === "novels" ? continueBooks.length : continueCourses.length;
 
   return (
     <div>
       <PageHeader
         title="Library"
-        subtitle="Your books and the full catalog"
+        subtitle="Your novels and courses — pick up where you left off"
         action={
           <div className="flex rounded-xl border border-slate-200 bg-white p-1">
-            <button
-              onClick={() => setTab("mine")}
-              className={`rounded-lg px-4 py-1.5 text-sm font-medium ${tab === "mine" ? "bg-brand text-white" : "text-slate-600"}`}
-            >
-              My Books
-            </button>
-            <button
-              onClick={() => setTab("browse")}
-              className={`rounded-lg px-4 py-1.5 text-sm font-medium ${tab === "browse" ? "bg-brand text-white" : "text-slate-600"}`}
-            >
-              Browse
-            </button>
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`rounded-lg px-4 py-1.5 text-sm font-medium ${
+                  tab === t.id ? "bg-brand text-white" : "text-slate-600"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         }
       />
       <ErrorText message={error} />
 
-      {tab === "mine" ? (
-        mine === null ? (
+      {/* Continue reading / learning */}
+      {continueItems > 0 ? (
+        <div className="mb-6">
+          <p className="mb-3 text-sm font-semibold text-slate-900">
+            Continue {tab === "novels" ? "reading" : "learning"}
+          </p>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+            {tab === "novels"
+              ? continueBooks.map((e) => (
+                  <Card key={e.bookId} className="flex flex-col">
+                    <Cover url={e.book.coverUrl} kind="book" />
+                    <p className="mt-3 line-clamp-2 text-sm font-semibold">
+                      {e.book.title}
+                    </p>
+                    <ProgressBar percent={e.progress?.percentComplete ?? 0} />
+                    <Link href={`/client/library/${e.bookId}`} className="mt-3">
+                      <Button className="w-full">Continue</Button>
+                    </Link>
+                  </Card>
+                ))
+              : continueCourses.map((e) => (
+                  <Card key={e.courseId} className="flex flex-col">
+                    <Cover url={e.course?.coverUrl} kind="course" />
+                    <p className="mt-3 line-clamp-2 text-sm font-semibold">
+                      {e.course?.title}
+                    </p>
+                    <ProgressBar percent={e.percentComplete ?? 0} />
+                    <Link
+                      href={`/client/courses/${e.courseId}`}
+                      className="mt-3"
+                    >
+                      <Button className="w-full">
+                        <PlayCircle className="h-4 w-4" /> Continue
+                      </Button>
+                    </Link>
+                  </Card>
+                ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* All items in this tab */}
+      {tab === "novels" ? (
+        books === null ? (
           <Spinner />
-        ) : mine.length === 0 ? (
+        ) : books.length === 0 ? (
           <Card>
-            <p className="text-sm text-slate-500">
-              You don’t own any books yet. Switch to <strong>Browse</strong> to
-              explore the catalog.
+            <p className="py-6 text-center text-sm text-slate-500">
+              You don’t have any novels yet. Visit{" "}
+              <Link href="/client/explore" className="font-medium text-brand">
+                Explore
+              </Link>{" "}
+              to add some.
             </p>
           </Card>
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {mine.map((e) => (
+            {books.map((e) => (
               <Card key={e.bookId} className="flex flex-col">
-                <Cover book={e.book} />
-                <p className="mt-3 line-clamp-2 font-semibold">{e.book.title}</p>
+                <Cover url={e.book.coverUrl} kind="book" />
+                <p className="mt-3 line-clamp-2 text-sm font-semibold">
+                  {e.book.title}
+                </p>
                 <p className="text-xs text-slate-500">{e.book.author}</p>
-                {e.progress && e.progress.percentComplete > 0 ? (
-                  <div className="mt-2">
-                    <div className="h-1.5 w-full rounded-full bg-slate-100">
-                      <div
-                        className="h-1.5 rounded-full bg-brand"
-                        style={{ width: `${Math.min(100, e.progress.percentComplete)}%` }}
-                      />
-                    </div>
-                  </div>
+                {(e.progress?.percentComplete ?? 0) > 0 ? (
+                  <ProgressBar percent={e.progress?.percentComplete ?? 0} />
                 ) : null}
                 <Link href={`/client/library/${e.bookId}`} className="mt-3">
                   <Button className="w-full">
                     {e.progress?.isCompleted
                       ? "Read again"
-                      : e.progress && e.progress.percentComplete > 0
+                      : (e.progress?.percentComplete ?? 0) > 0
                         ? "Continue"
                         : "Read"}
                   </Button>
@@ -129,57 +195,34 @@ export default function LibraryPage() {
             ))}
           </div>
         )
+      ) : courses === null ? (
+        <Spinner />
+      ) : courses.length === 0 ? (
+        <Card>
+          <p className="py-6 text-center text-sm text-slate-500">
+            You haven’t enrolled in any course yet. Visit{" "}
+            <Link href="/client/explore" className="font-medium text-brand">
+              Explore
+            </Link>{" "}
+            to get started.
+          </p>
+        </Card>
       ) : (
-        <div>
-          <div className="mb-4 max-w-sm">
-            <Input
-              placeholder="Search books…"
-              value={q}
-              onChange={(ev) => setQ(ev.target.value)}
-            />
-          </div>
-          {catalog === null ? (
-            <Spinner />
-          ) : (
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-              {filtered.map((b) => {
-                const owned = ownedIds.has(b.id);
-                return (
-                  <Card key={b.id} className="flex flex-col">
-                    <Cover book={b} />
-                    <div className="mt-3 flex items-start justify-between gap-2">
-                      <p className="line-clamp-2 font-semibold">{b.title}</p>
-                      {owned ? <Badge color="green">Owned</Badge> : null}
-                    </div>
-                    <p className="text-xs text-slate-500">{b.author}</p>
-                    {b.description ? (
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-400">
-                        {b.description}
-                      </p>
-                    ) : null}
-                    <div className="mt-3">
-                      {owned ? (
-                        <Link href={`/client/library/${b.id}`}>
-                          <Button className="w-full">Read</Button>
-                        </Link>
-                      ) : (
-                        <Link href="/client/packages">
-                          <Button variant="outline" className="w-full">
-                            {b.price > 0
-                              ? `${b.currency} ${b.price.toLocaleString()}`
-                              : "Get access"}
-                          </Button>
-                        </Link>
-                      )}
-                    </div>
-                  </Card>
-                );
-              })}
-              {filtered.length === 0 ? (
-                <p className="text-sm text-slate-400">No books found.</p>
-              ) : null}
-            </div>
-          )}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+          {courses.map((e) => (
+            <Card key={e.courseId} className="flex flex-col">
+              <Cover url={e.course?.coverUrl} kind="course" />
+              <p className="mt-3 line-clamp-2 text-sm font-semibold">
+                {e.course?.title}
+              </p>
+              <ProgressBar percent={e.percentComplete ?? 0} />
+              <Link href={`/client/courses/${e.courseId}`} className="mt-3">
+                <Button className="w-full">
+                  <PlayCircle className="h-4 w-4" /> Continue
+                </Button>
+              </Link>
+            </Card>
+          ))}
         </div>
       )}
     </div>

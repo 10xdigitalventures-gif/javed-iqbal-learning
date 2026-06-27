@@ -1,4 +1,12 @@
-import { Controller, Get, Header, Param, Res, UseGuards } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  Header,
+  Param,
+  Query,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import type { Response } from "express";
 import { Role } from "@prisma/client";
 import { ReportsService } from "./reports.service";
@@ -26,6 +34,44 @@ export class ReportsController {
   async audit(@Res() res: Response) {
     const csv = await this.service.auditCsv();
     res.send(csv);
+  }
+
+  // Daily time-series (revenue, orders, signups, enrollments, completions).
+  @Get("admin/timeseries")
+  @Roles(Role.ADMIN)
+  timeseries(@Query("from") from?: string, @Query("to") to?: string) {
+    return this.service.timeseries(from, to);
+  }
+
+  @Get("admin/timeseries/export")
+  @Roles(Role.ADMIN)
+  @Header("Content-Type", "text/csv")
+  @Header("Content-Disposition", "attachment; filename=timeseries.csv")
+  async timeseriesExport(
+    @Res() res: Response,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    res.send(await this.service.timeseriesCsv(from, to));
+  }
+
+  // Per-course completion / drop-off funnel.
+  @Get("admin/funnel")
+  @Roles(Role.ADMIN)
+  funnel(@Query("from") from?: string, @Query("to") to?: string) {
+    return this.service.courseFunnel(from, to);
+  }
+
+  @Get("admin/funnel/export")
+  @Roles(Role.ADMIN)
+  @Header("Content-Type", "text/csv")
+  @Header("Content-Disposition", "attachment; filename=course-funnel.csv")
+  async funnelExport(
+    @Res() res: Response,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    res.send(await this.service.courseFunnelCsv(from, to));
   }
 
   @Get("consultant/me")

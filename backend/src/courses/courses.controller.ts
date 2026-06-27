@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import { Role } from "@prisma/client";
@@ -18,12 +19,24 @@ import {
   CreateCourseDto,
   UpdateCourseDto,
   CreateLessonDto,
+  UpdateLessonDto,
+  CreateModuleDto,
+  UpdateModuleDto,
   CreateQuizDto,
+  UpdateQuizDto,
   CreateQuizQuestionDto,
+  UpdateQuizQuestionDto,
   SubmitQuizDto,
+  LessonProgressDto,
   CreateAssignmentDto,
+  UpdateAssignmentDto,
   SubmitAssignmentDto,
   GradeSubmissionDto,
+  ReviewDto,
+  CreateLessonNoteDto,
+  UpdateLessonNoteDto,
+  AskQuestionDto,
+  AnswerQuestionDto,
 } from "./dto";
 
 @Controller("courses")
@@ -41,6 +54,27 @@ export class CoursesController {
   @Roles(Role.ADMIN)
   findAllAdmin() {
     return this.service.findAll(false);
+  }
+
+  // Paginated / searchable / sortable list for the admin courses table.
+  @Get("admin/paged")
+  @Roles(Role.ADMIN)
+  findAllAdminPaged(
+    @Query("q") q?: string,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sort") sort?: string,
+    @Query("order") order?: string,
+  ) {
+    return this.service.findAllPaged({
+      q,
+      status,
+      page,
+      pageSize,
+      sort,
+      order,
+    });
   }
 
   @Get("me/enrolled")
@@ -77,6 +111,25 @@ export class CoursesController {
     return this.service.remove(id);
   }
 
+  // ---- Modules (sections) ----
+  @Post("modules")
+  @Roles(Role.ADMIN)
+  createModule(@Body() dto: CreateModuleDto) {
+    return this.service.createModule(dto);
+  }
+
+  @Patch("modules/:id")
+  @Roles(Role.ADMIN)
+  updateModule(@Param("id") id: string, @Body() dto: UpdateModuleDto) {
+    return this.service.updateModule(id, dto);
+  }
+
+  @Delete("modules/:id")
+  @Roles(Role.ADMIN)
+  removeModule(@Param("id") id: string) {
+    return this.service.removeModule(id);
+  }
+
   // ---- Lessons ----
   @Post("lessons")
   @Roles(Role.ADMIN)
@@ -84,10 +137,38 @@ export class CoursesController {
     return this.service.addLesson(dto);
   }
 
+  @Patch("lessons/:id")
+  @Roles(Role.ADMIN)
+  updateLesson(@Param("id") id: string, @Body() dto: UpdateLessonDto) {
+    return this.service.updateLesson(id, dto);
+  }
+
   @Delete("lessons/:id")
   @Roles(Role.ADMIN)
   removeLesson(@Param("id") id: string) {
     return this.service.removeLesson(id);
+  }
+
+  // Any enrolled learner can mark a lesson complete (drives live progress).
+  @Post("lessons/:id/complete")
+  completeLesson(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.service.markLessonComplete(user.userId, id);
+  }
+
+  // Report how much of a video lesson has been watched (0..1) so the course
+  // progress bar can grow gradually as the learner watches.
+  @Post("lessons/:id/progress")
+  lessonProgress(
+    @Param("id") id: string,
+    @Body() dto: LessonProgressDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updateLessonProgress(
+      user.userId,
+      id,
+      dto.progress,
+      dto.positionSec,
+    );
   }
 
   // ---- Enrollment ----
@@ -103,10 +184,34 @@ export class CoursesController {
     return this.service.createQuiz(dto);
   }
 
+  @Patch("quizzes/:id")
+  @Roles(Role.ADMIN)
+  updateQuiz(@Param("id") id: string, @Body() dto: UpdateQuizDto) {
+    return this.service.updateQuiz(id, dto);
+  }
+
+  @Delete("quizzes/:id")
+  @Roles(Role.ADMIN)
+  removeQuiz(@Param("id") id: string) {
+    return this.service.removeQuiz(id);
+  }
+
   @Post("quizzes/questions")
   @Roles(Role.ADMIN)
   addQuestion(@Body() dto: CreateQuizQuestionDto) {
     return this.service.addQuestion(dto);
+  }
+
+  @Patch("quizzes/questions/:id")
+  @Roles(Role.ADMIN)
+  updateQuestion(@Param("id") id: string, @Body() dto: UpdateQuizQuestionDto) {
+    return this.service.updateQuestion(id, dto);
+  }
+
+  @Delete("quizzes/questions/:id")
+  @Roles(Role.ADMIN)
+  removeQuestion(@Param("id") id: string) {
+    return this.service.removeQuestion(id);
   }
 
   @Post("quizzes/:quizId/submit")
@@ -118,11 +223,37 @@ export class CoursesController {
     return this.service.submitQuiz(user.userId, quizId, dto);
   }
 
+  @Get("quizzes/:quizId/attempts")
+  @Roles(Role.ADMIN)
+  quizAttempts(@Param("quizId") quizId: string) {
+    return this.service.quizAttempts(quizId);
+  }
+
+  @Get("quizzes/:quizId/my-attempts")
+  myQuizAttempts(
+    @Param("quizId") quizId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.quizAttempts(quizId, user.userId);
+  }
+
   // ---- Assignments ----
   @Post("assignments")
   @Roles(Role.ADMIN)
   createAssignment(@Body() dto: CreateAssignmentDto) {
     return this.service.createAssignment(dto);
+  }
+
+  @Patch("assignments/:id")
+  @Roles(Role.ADMIN)
+  updateAssignment(@Param("id") id: string, @Body() dto: UpdateAssignmentDto) {
+    return this.service.updateAssignment(id, dto);
+  }
+
+  @Delete("assignments/:id")
+  @Roles(Role.ADMIN)
+  removeAssignment(@Param("id") id: string) {
+    return this.service.removeAssignment(id);
   }
 
   @Get("assignments/:id/submissions")
@@ -131,13 +262,23 @@ export class CoursesController {
     return this.service.getSubmissions(id);
   }
 
+  // Admin review queue: every submission across one course.
+  @Get(":courseId/submissions")
+  @Roles(Role.ADMIN)
+  courseSubmissions(@Param("courseId") courseId: string) {
+    return this.service.courseSubmissions(courseId);
+  }
+
   @Patch("submissions/:id/grade")
   @Roles(Role.ADMIN)
-  gradeSubmission(
-    @Param("id") id: string,
-    @Body() dto: GradeSubmissionDto,
-  ) {
+  gradeSubmission(@Param("id") id: string, @Body() dto: GradeSubmissionDto) {
     return this.service.gradeSubmission(id, dto);
+  }
+
+  // The current learner's own submission for one assignment.
+  @Get("assignments/:id/my-submission")
+  mySubmission(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.service.mySubmission(user.userId, id);
   }
 
   @Post("assignments/:id/submit")
@@ -147,6 +288,128 @@ export class CoursesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.submitAssignment(user.userId, id, dto);
+  }
+
+  // ---- Reviews & ratings ----
+  // Public list of a course's reviews (anyone signed in can read).
+  @Get(":courseId/reviews")
+  listReviews(@Param("courseId") courseId: string) {
+    return this.service.listReviews(courseId);
+  }
+
+  // Create or update the current learner's review (enrolled learners only).
+  @Post(":courseId/reviews")
+  upsertReview(
+    @Param("courseId") courseId: string,
+    @Body() dto: ReviewDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.upsertReview(
+      user.userId,
+      courseId,
+      dto.rating,
+      dto.comment,
+    );
+  }
+
+  // Remove the current learner's own review.
+  @Delete(":courseId/reviews")
+  deleteMyReview(
+    @Param("courseId") courseId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.deleteReview(
+      user.userId,
+      courseId,
+      user.role === Role.ADMIN,
+    );
+  }
+
+  // Admin moderation: delete any single review by id.
+  @Delete("reviews/:id")
+  @Roles(Role.ADMIN)
+  adminDeleteReview(@Param("id") id: string) {
+    return this.service.adminDeleteReview(id);
+  }
+
+  // ---- Lesson notes (private) ----
+  @Get("lessons/:id/notes")
+  lessonNotes(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.service.listNotes(user.userId, id);
+  }
+
+  @Post("notes")
+  createNote(@Body() dto: CreateLessonNoteDto, @CurrentUser() user: AuthUser) {
+    return this.service.createNote(
+      user.userId,
+      dto.lessonId,
+      dto.body,
+      dto.positionSec,
+    );
+  }
+
+  @Patch("notes/:id")
+  updateNote(
+    @Param("id") id: string,
+    @Body() dto: UpdateLessonNoteDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updateNote(user.userId, id, dto.body, dto.positionSec);
+  }
+
+  @Delete("notes/:id")
+  deleteNote(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.service.deleteNote(user.userId, id);
+  }
+
+  // ---- Lesson Q&A ----
+  @Get("lessons/:id/questions")
+  lessonQuestions(@Param("id") id: string) {
+    return this.service.listQuestions(id);
+  }
+
+  @Post("questions")
+  askQuestion(@Body() dto: AskQuestionDto, @CurrentUser() user: AuthUser) {
+    return this.service.askQuestion(user.userId, dto.lessonId, dto.body);
+  }
+
+  @Post("questions/:id/answers")
+  answerQuestion(
+    @Param("id") id: string,
+    @Body() dto: AnswerQuestionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const isInstructor =
+      user.role === Role.ADMIN || user.role === Role.CONSULTANT;
+    return this.service.answerQuestion(user.userId, id, dto.body, isInstructor);
+  }
+
+  @Patch("questions/:id/resolve")
+  resolveQuestion(
+    @Param("id") id: string,
+    @Body() body: { resolved?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.setQuestionResolved(
+      user.userId,
+      id,
+      body?.resolved !== false,
+      user.role === Role.ADMIN,
+    );
+  }
+
+  @Delete("questions/:id")
+  deleteQuestion(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.service.deleteQuestion(
+      user.userId,
+      id,
+      user.role === Role.ADMIN,
+    );
+  }
+
+  @Delete("answers/:id")
+  deleteAnswer(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.service.deleteAnswer(user.userId, id, user.role === Role.ADMIN);
   }
 
   // ---- Certificates ----

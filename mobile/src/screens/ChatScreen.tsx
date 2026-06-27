@@ -3,7 +3,10 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
+  Linking,
+  Modal,
   Platform,
   Text,
   TextInput,
@@ -18,11 +21,32 @@ import * as DocumentPicker from "expo-document-picker";
 import { api, uploadMedia } from "../api";
 import { useAuth } from "../auth";
 import { colors } from "../theme";
+import { useContentProtection } from "../protect";
 
 // ---- Limits (enforced in the UI; the server also enforces package limits) ----
 const TEXT_CHAR_LIMIT = 2000; // characters per text message
 const AUDIO_MAX_SEC = 120; // voice note length (2 min)
 const VIDEO_MAX_SEC = 60; // video message length (1 min)
+
+// Quick-reaction palette shown in the message action sheet.
+const REACTION_EMOJIS = [
+  "\uD83D\uDC4D",
+  "\u2764\uFE0F",
+  "\uD83D\uDE02",
+  "\uD83D\uDE2E",
+  "\uD83D\uDE22",
+  "\uD83D\uDE4F",
+];
+
+function previewText(m: any): string {
+  if (!m) return "";
+  if (m.type === "TEXT") return m.body || "";
+  if (m.type === "IMAGE") return "\uD83D\uDDBC\uFE0F Photo";
+  if (m.type === "FILE") return "\uD83D\uDCCE " + (m.fileName || "File");
+  if (m.type === "AUDIO") return "\uD83C\uDFA4 Audio message";
+  if (m.type === "VIDEO") return "\uD83C\uDFA5 Video message";
+  return "";
+}
 
 function fmtDur(sec?: number | null) {
   const s = Math.max(0, Math.round(sec || 0));
@@ -90,7 +114,10 @@ function AudioBubble({
   const shown = playing || pos > 0 ? pos : durationSec;
   return (
     <View style={s.audioRow}>
-      <TouchableOpacity onPress={toggle} style={[s.playBtn, { borderColor: tint }]}>
+      <TouchableOpacity
+        onPress={toggle}
+        style={[s.playBtn, { borderColor: tint }]}
+      >
         <Ionicons name={playing ? "pause" : "play"} size={16} color={tint} />
       </TouchableOpacity>
       <Ionicons name="mic" size={14} color={tint} style={s.audioIcon} />
@@ -134,6 +161,8 @@ function VideoBubble({
 }
 
 export default function ChatScreen({ route, navigation }: any) {
+  // Block screenshots / screen recording inside the chat.
+  useContentProtection();
   const { conversationId, peerName } = route.params;
   const { user } = useAuth();
   const [messages, setMessages] = useState<any[]>([]);
@@ -145,6 +174,10 @@ export default function ChatScreen({ route, navigation }: any) {
   const recSecRef = useRef(0);
   const recTimer = useRef<any>(null);
   const listRef = useRef<FlatList>(null);
+  const [replyTo, setReplyTo] = useState<any | null>(null);
+  const [editing, setEditing] = useState<{ id: string } | null>(null);
+  const [actionMsg, setActionMsg] = useState<any | null>(null);
+  const typingSentAt = useRef(0);
 
   useEffect(() => {
     navigation.setOptions({ title: peerName || "Chat" });
@@ -168,15 +201,31 @@ export default function ChatScreen({ route, navigation }: any) {
     };
   }, [conversationId]);
 
+  // Throttled typing ping so the peer sees a "typing…" indicator.
+  function onType(t: string) {
+    setText(t.slice(0, TEXT_CHAR_LIMIT));
+    const now = Date.now();
+    if (now - typingSentAt.current > 1500) {
+      typingSentAt.current = now;
+      api(`/conversations/${conversationId}/typing`, {
+        method: "POST",
+        body: { typing: true },
+      }).catch(() => {});
+    }
+  }
+
   async function sendText() {
+    if (editing) return saveEdit();
     const body = text.trim();
     if (!body || sending) return;
+    const replyId = replyTo?.id;
     setText("");
+    setReplyTo(null);
     try {
       setSending(true);
       await api(`/conversations/${conversationId}/messages`, {
         method: "POST",
-        body: { type: "TEXT", body },
+        body: { type: "TEXT", body, replyToId: replyId },
       });
       await load();
     } catch (err: any) {
@@ -184,6 +233,51 @@ export default function ChatScreen({ route, navigation }: any) {
       Alert.alert("Couldn't send", err?.message || "Please try again.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    const body = text.trim();
+    if (!body) return;
+    const id = editing.id;
+    setEditing(null);
+    setText("");
+    try {
+      setSending(true);
+      await api(`/conversations/${conversationId}/messages/${id}`, {
+        method: "PATCH",
+        body: { body },
+      });
+      await load();
+    } catch (err: any) {
+      Alert.alert("Couldn't edit", err?.message || "Please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function deleteMessage(id: string) {
+    try {
+      await api(`/conversations/${conversationId}/messages/${id}`, {
+        method: "DELETE",
+      });
+      await load();
+    } catch (err: any) {
+      Alert.alert("Couldn't delete", err?.message || "Please try again.");
+    }
+  }
+
+  async function toggleReaction(id: string, emoji: string) {
+    setActionMsg(null);
+    try {
+      await api(`/conversations/${conversationId}/messages/${id}/react`, {
+        method: "POST",
+        body: { emoji },
+      });
+      await load();
+    } catch (err: any) {
+      Alert.alert("Reaction failed", err?.message || "Please try again.");
     }
   }
 
@@ -335,6 +429,102 @@ export default function ChatScreen({ route, navigation }: any) {
     }
   }
 
+  // ---- Generic attachment (image or any document) ----
+  async function sendAttachment(
+    type: "IMAGE" | "FILE" | "AUDIO" | "VIDEO",
+    file: { uri: string; name: string; type: string },
+  ) {
+    const replyId = replyTo?.id;
+    try {
+      setSending(true);
+      const up = await uploadMedia(file);
+      await api(`/conversations/${conversationId}/messages`, {
+        method: "POST",
+        body: {
+          type,
+          mediaKey: up.key,
+          fileName: file.name,
+          durationSec: up.durationSec != null ? up.durationSec : undefined,
+          replyToId: replyId,
+        },
+      });
+      setReplyTo(null);
+      await load();
+    } catch (err: any) {
+      Alert.alert("Couldn't send", err?.message || "Upload failed.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function attachPhoto() {
+    if (sending) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Photos needed", "Please allow photo library access.");
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"] as any,
+        quality: 0.8,
+      });
+      if (res.canceled || !res.assets || !res.assets.length) return;
+      const a = res.assets[0];
+      await sendAttachment("IMAGE", {
+        uri: a.uri,
+        name: a.fileName || "photo-" + Date.now() + ".jpg",
+        type: a.mimeType || "image/jpeg",
+      });
+    } catch {
+      Alert.alert("Photo error", "Could not attach photo.");
+    }
+  }
+
+  async function attachDocument() {
+    if (sending) return;
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets || !res.assets.length) return;
+      const a = res.assets[0];
+      const mime = a.mimeType || "";
+      const type = mime.startsWith("image")
+        ? "IMAGE"
+        : mime.startsWith("video")
+          ? "VIDEO"
+          : mime.startsWith("audio")
+            ? "AUDIO"
+            : "FILE";
+      await sendAttachment(type, {
+        uri: a.uri,
+        name: a.name || "file-" + Date.now(),
+        type: mime || "application/octet-stream",
+      });
+    } catch {
+      Alert.alert("Upload error", "Could not upload the file.");
+    }
+  }
+
+  // Bottom "+" opens a simple attach menu.
+  function openAttachMenu() {
+    if (sending) return;
+    Alert.alert("Attach", "Choose what to send", [
+      { text: "Photo", onPress: attachPhoto },
+      { text: "Document / File", onPress: attachDocument },
+      { text: "Audio / Video file", onPress: attachFile },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  // Long-press a message to reply / react / edit / delete.
+  function openActions(m: any) {
+    if (m.deletedAt) return;
+    setActionMsg(m);
+  }
+
   return (
     <KeyboardAvoidingView
       style={s.wrap}
@@ -345,36 +535,238 @@ export default function ChatScreen({ route, navigation }: any) {
         data={messages}
         keyExtractor={(m) => m.id}
         contentContainerStyle={s.list}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={() =>
+          listRef.current?.scrollToEnd({ animated: true })
+        }
         renderItem={({ item }) => {
           const mine = item.senderId === user?.id;
+          const deleted = !!item.deletedAt;
+          const tint = mine ? "#fff" : colors.brand;
+          // Group reactions by emoji with counts + whether I reacted.
+          const groups: Record<
+            string,
+            { emoji: string; count: number; mine: boolean }
+          > = {};
+          (item.reactions || []).forEach((r: any) => {
+            const g = groups[r.emoji] || {
+              emoji: r.emoji,
+              count: 0,
+              mine: false,
+            };
+            g.count += 1;
+            if (r.userId === user?.id) g.mine = true;
+            groups[r.emoji] = g;
+          });
+          const reactionGroups = Object.values(groups);
+          const imgSrc = item.mediaUrl ? { uri: item.mediaUrl } : undefined;
           return (
             <View style={[s.bubbleRow, mine ? s.right : s.left]}>
-              <View style={[s.bubble, mine ? s.bubbleMine : s.bubbleOther]}>
-                {item.type === "AUDIO" ? (
-                  <AudioBubble
-                    uri={item.mediaUrl}
-                    durationSec={item.durationSec}
-                    mine={mine}
-                  />
-                ) : item.type === "VIDEO" ? (
-                  <VideoBubble
-                    uri={item.mediaUrl}
-                    durationSec={item.durationSec}
-                    mine={mine}
-                  />
-                ) : (
-                  <Text style={mine ? s.textMine : s.text}>{item.body}</Text>
-                )}
+              <View style={s.bubbleWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onLongPress={() => openActions(item)}
+                  delayLongPress={250}
+                  style={[s.bubble, mine ? s.bubbleMine : s.bubbleOther]}
+                >
+                  {/* Quoted reply */}
+                  {item.replyTo ? (
+                    <View
+                      style={[
+                        s.replyQuote,
+                        { borderLeftColor: mine ? "#fff" : colors.brand },
+                      ]}
+                    >
+                      <Text
+                        style={[s.replyName, { color: tint }]}
+                        numberOfLines={1}
+                      >
+                        {item.replyTo.sender?.name || "Reply"}
+                      </Text>
+                      <Text
+                        style={[s.replyBody, { color: tint }]}
+                        numberOfLines={2}
+                      >
+                        {previewText(item.replyTo)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {deleted ? (
+                    <Text
+                      style={[
+                        mine ? s.textMine : s.text,
+                        { fontStyle: "italic", opacity: 0.8 },
+                      ]}
+                    >
+                      This message was deleted
+                    </Text>
+                  ) : item.type === "AUDIO" ? (
+                    <AudioBubble
+                      uri={item.mediaUrl}
+                      durationSec={item.durationSec}
+                      mine={mine}
+                    />
+                  ) : item.type === "VIDEO" ? (
+                    <VideoBubble
+                      uri={item.mediaUrl}
+                      durationSec={item.durationSec}
+                      mine={mine}
+                    />
+                  ) : item.type === "IMAGE" && item.mediaUrl ? (
+                    <TouchableOpacity
+                      onPress={() => Linking.openURL(item.mediaUrl)}
+                    >
+                      <Image
+                        source={imgSrc}
+                        style={s.image}
+                        resizeMode="cover"
+                      />
+                    </TouchableOpacity>
+                  ) : item.type === "FILE" && item.mediaUrl ? (
+                    <TouchableOpacity
+                      style={s.fileRow}
+                      onPress={() => Linking.openURL(item.mediaUrl)}
+                    >
+                      <Ionicons name="document" size={20} color={tint} />
+                      <Text
+                        style={[s.fileName, { color: tint }]}
+                        numberOfLines={1}
+                      >
+                        {item.fileName || "Download file"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={mine ? s.textMine : s.text}>{item.body}</Text>
+                  )}
+
+                  {/* Footer: edited + time + read ticks */}
+                  <View style={s.metaRow}>
+                    {item.editedAt && !deleted ? (
+                      <Text style={[s.metaTxt, { color: tint, opacity: 0.8 }]}>
+                        edited
+                      </Text>
+                    ) : null}
+                    <Text style={[s.metaTxt, { color: tint, opacity: 0.7 }]}>
+                      {new Date(item.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </Text>
+                    {mine && !deleted ? (
+                      <Ionicons
+                        name={
+                          item.status === "READ" || item.status === "DELIVERED"
+                            ? "checkmark-done"
+                            : "checkmark"
+                        }
+                        size={14}
+                        color={item.status === "READ" ? "#BAE6FD" : tint}
+                      />
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+
+                {/* Reaction chips */}
+                {reactionGroups.length > 0 ? (
+                  <View
+                    style={[
+                      s.reactionRow,
+                      mine ? { justifyContent: "flex-end" } : null,
+                    ]}
+                  >
+                    {reactionGroups.map((g) => (
+                      <TouchableOpacity
+                        key={g.emoji}
+                        onPress={() => toggleReaction(item.id, g.emoji)}
+                        style={[
+                          s.reactionChip,
+                          g.mine ? s.reactionChipMine : null,
+                        ]}
+                      >
+                        <Text style={s.reactionEmoji}>{g.emoji}</Text>
+                        <Text style={s.reactionCount}>{g.count}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             </View>
           );
         }}
       />
 
+      {/* Message action sheet (long-press) */}
+      <Modal
+        visible={!!actionMsg}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionMsg(null)}
+      >
+        <TouchableOpacity
+          style={s.sheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setActionMsg(null)}
+        >
+          <View style={s.sheet}>
+            <View style={s.emojiRow}>
+              {REACTION_EMOJIS.map((e) => (
+                <TouchableOpacity
+                  key={e}
+                  onPress={() => actionMsg && toggleReaction(actionMsg.id, e)}
+                  style={s.emojiBtn}
+                >
+                  <Text style={s.emojiBig}>{e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={s.sheetItem}
+              onPress={() => {
+                setReplyTo(actionMsg);
+                setActionMsg(null);
+              }}
+            >
+              <Ionicons name="arrow-undo" size={20} color={colors.text} />
+              <Text style={s.sheetText}>Reply</Text>
+            </TouchableOpacity>
+            {actionMsg &&
+            actionMsg.senderId === user?.id &&
+            actionMsg.type === "TEXT" ? (
+              <TouchableOpacity
+                style={s.sheetItem}
+                onPress={() => {
+                  setEditing({ id: actionMsg.id });
+                  setText(actionMsg.body || "");
+                  setActionMsg(null);
+                }}
+              >
+                <Ionicons name="create-outline" size={20} color={colors.text} />
+                <Text style={s.sheetText}>Edit</Text>
+              </TouchableOpacity>
+            ) : null}
+            {actionMsg && actionMsg.senderId === user?.id ? (
+              <TouchableOpacity
+                style={s.sheetItem}
+                onPress={() => {
+                  const id = actionMsg.id;
+                  setActionMsg(null);
+                  deleteMessage(id);
+                }}
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.red} />
+                <Text style={[s.sheetText, { color: colors.red }]}>Delete</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {recording ? (
         <View style={s.inputBar}>
-          <TouchableOpacity onPress={() => stopRecording(false)} style={s.iconBtn}>
+          <TouchableOpacity
+            onPress={() => stopRecording(false)}
+            style={s.iconBtn}
+          >
             <Ionicons name="trash-outline" size={24} color={colors.red} />
           </TouchableOpacity>
           <View style={s.recInfo}>
@@ -383,19 +775,64 @@ export default function ChatScreen({ route, navigation }: any) {
               {"Recording  " + fmtDur(recSec) + " / " + fmtDur(AUDIO_MAX_SEC)}
             </Text>
           </View>
-          <TouchableOpacity onPress={() => stopRecording(true)} style={s.sendBtnRound}>
+          <TouchableOpacity
+            onPress={() => stopRecording(true)}
+            style={s.sendBtnRound}
+          >
             <Ionicons name="send" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
       ) : (
         <View>
+          {replyTo ? (
+            <View style={s.replyBar}>
+              <View style={s.replyBarBody}>
+                <Text style={s.replyBarName} numberOfLines={1}>
+                  Replying to {replyTo.sender?.name || "message"}
+                </Text>
+                <Text style={s.replyBarText} numberOfLines={1}>
+                  {previewText(replyTo)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setReplyTo(null)}
+                style={s.iconBtn}
+              >
+                <Ionicons name="close" size={20} color={colors.muted} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {editing ? (
+            <View style={s.replyBar}>
+              <View style={s.replyBarBody}>
+                <Text style={s.replyBarName}>Editing message</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setEditing(null);
+                  setText("");
+                }}
+                style={s.iconBtn}
+              >
+                <Ionicons name="close" size={20} color={colors.muted} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
           <View style={s.inputBar}>
-            <TouchableOpacity onPress={attachFile} style={s.iconBtn} disabled={sending}>
-              <Ionicons name="add-circle-outline" size={26} color={colors.brand} />
+            <TouchableOpacity
+              onPress={openAttachMenu}
+              style={s.iconBtn}
+              disabled={sending}
+            >
+              <Ionicons
+                name="add-circle-outline"
+                size={26}
+                color={colors.brand}
+              />
             </TouchableOpacity>
             <TextInput
               value={text}
-              onChangeText={(t) => setText(t.slice(0, TEXT_CHAR_LIMIT))}
+              onChangeText={onType}
               placeholder="Type a message..."
               placeholderTextColor={colors.muted}
               style={s.input}
@@ -403,15 +840,31 @@ export default function ChatScreen({ route, navigation }: any) {
               maxLength={TEXT_CHAR_LIMIT}
             />
             {text.trim() ? (
-              <TouchableOpacity onPress={sendText} style={s.sendBtnRound} disabled={sending}>
+              <TouchableOpacity
+                onPress={sendText}
+                style={s.sendBtnRound}
+                disabled={sending}
+              >
                 <Ionicons name="send" size={18} color="#fff" />
               </TouchableOpacity>
             ) : (
               <>
-                <TouchableOpacity onPress={recordVideo} style={s.iconBtn} disabled={sending}>
-                  <Ionicons name="videocam-outline" size={24} color={colors.brand} />
+                <TouchableOpacity
+                  onPress={recordVideo}
+                  style={s.iconBtn}
+                  disabled={sending}
+                >
+                  <Ionicons
+                    name="videocam-outline"
+                    size={24}
+                    color={colors.brand}
+                  />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={startRecording} style={s.iconBtn} disabled={sending}>
+                <TouchableOpacity
+                  onPress={startRecording}
+                  style={s.iconBtn}
+                  disabled={sending}
+                >
                   <Ionicons name="mic-outline" size={24} color={colors.brand} />
                 </TouchableOpacity>
               </>
@@ -427,7 +880,9 @@ export default function ChatScreen({ route, navigation }: any) {
               <View />
             )}
             {text.length > 0 ? (
-              <Text style={s.counter}>{text.length + "/" + TEXT_CHAR_LIMIT}</Text>
+              <Text style={s.counter}>
+                {text.length + "/" + TEXT_CHAR_LIMIT}
+              </Text>
             ) : null}
           </View>
         </View>
@@ -506,7 +961,12 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  recInfo: { flex: 1, flexDirection: "row", alignItems: "center", marginLeft: 8 },
+  recInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8,
+  },
   recDot: {
     width: 10,
     height: 10,
@@ -526,4 +986,103 @@ const s = StyleSheet.create({
   sendingRow: { flexDirection: "row", alignItems: "center" },
   sendingText: { color: colors.muted, marginLeft: 6, fontSize: 12 },
   counter: { color: colors.muted, fontSize: 12 },
+  bubbleWrap: { maxWidth: "82%" },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    marginTop: 3,
+  },
+  metaTxt: { fontSize: 10, marginRight: 3 },
+  replyQuote: {
+    borderLeftWidth: 2,
+    paddingLeft: 6,
+    marginBottom: 5,
+    opacity: 0.9,
+  },
+  replyName: { fontSize: 11, fontWeight: "700" },
+  replyBody: { fontSize: 12 },
+  image: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+    backgroundColor: "#0001",
+  },
+  fileRow: { flexDirection: "row", alignItems: "center", paddingVertical: 2 },
+  fileName: {
+    marginLeft: 8,
+    fontSize: 13,
+    fontWeight: "600",
+    flexShrink: 1,
+    textDecorationLine: "underline",
+  },
+  reactionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 4,
+    gap: 4,
+  },
+  reactionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginRight: 4,
+  },
+  reactionChipMine: {
+    backgroundColor: colors.brandLight,
+    borderColor: colors.brand,
+  },
+  reactionEmoji: { fontSize: 12 },
+  reactionCount: { fontSize: 11, marginLeft: 3, color: colors.text },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "#00000055",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  emojiRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 6,
+  },
+  emojiBtn: { padding: 6 },
+  emojiBig: { fontSize: 26 },
+  sheetItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  sheetText: { marginLeft: 12, fontSize: 15, color: colors.text },
+  replyBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  replyBarBody: {
+    flex: 1,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.brand,
+    paddingLeft: 8,
+  },
+  replyBarName: { fontSize: 12, fontWeight: "700", color: colors.brand },
+  replyBarText: { fontSize: 12, color: colors.muted },
 });

@@ -40,6 +40,8 @@ const ENV_GROUPS: EnvGroup[] = [
       { key: "WHOP_COMPANY_ID", label: "Whop \u2013 Company ID" },
       { key: "WHOP_WEBHOOK_SECRET", label: "Whop \u2013 Webhook secret", secret: true },
       { key: "WHOP_API_BASE", label: "Whop \u2013 API base URL (optional override)" },
+      { key: "WHOP_USD_RATE", label: "Whop \u2013 PKR per 1 USD (e.g. 280)" },
+      { key: "WHOP_FEE_PERCENT", label: "Whop \u2013 Gateway fee % added on top (optional)" },
     ],
   },
   {

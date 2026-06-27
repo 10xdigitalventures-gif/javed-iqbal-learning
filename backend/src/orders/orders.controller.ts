@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { OrdersService } from "./orders.service";
 import { CreateOrderDto } from "./dto";
@@ -28,6 +36,29 @@ export class OrdersController {
   @Roles(Role.ADMIN)
   all() {
     return this.service.listAll();
+  }
+
+  // Paginated / searchable / sortable list for the admin orders table.
+  @Get("all/paged")
+  @Roles(Role.ADMIN)
+  allPaged(
+    @Query("q") q?: string,
+    @Query("status") status?: string,
+    @Query("kind") kind?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sort") sort?: string,
+    @Query("order") order?: string,
+  ) {
+    return this.service.listAllPaged({
+      q,
+      status,
+      kind,
+      page,
+      pageSize,
+      sort,
+      order,
+    });
   }
 
   @Get(":id")

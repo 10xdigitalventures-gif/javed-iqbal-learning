@@ -39,15 +39,33 @@ export type Package = {
   billingDays: number | null;
 };
 
+export type MessageReaction = {
+  id: string;
+  messageId: string;
+  userId: string;
+  emoji: string;
+};
+
 export type Message = {
   id: string;
   conversationId: string;
   senderId: string;
-  type: "TEXT" | "AUDIO" | "VIDEO";
+  type: "TEXT" | "AUDIO" | "VIDEO" | "IMAGE" | "FILE";
   body?: string;
   mediaUrl?: string;
+  fileName?: string;
   durationSec?: number;
   status: "SENT" | "DELIVERED" | "READ";
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  replyToId?: string | null;
+  replyTo?: {
+    id: string;
+    body?: string | null;
+    type: string;
+    sender?: { id: string; name: string };
+  } | null;
+  reactions?: MessageReaction[];
   createdAt: string;
 };
 

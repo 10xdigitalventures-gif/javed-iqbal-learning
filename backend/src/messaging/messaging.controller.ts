@@ -1,13 +1,21 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from "@nestjs/common";
 import { MessagingService } from "./messaging.service";
-import { SendMessageDto, StartConversationDto } from "./dto";
+import {
+  EditMessageDto,
+  ReactDto,
+  SendMessageDto,
+  StartConversationDto,
+  TypingDto,
+} from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser, AuthUser } from "../auth/current-user.decorator";
 
@@ -43,5 +51,43 @@ export class MessagingController {
   @Post(":id/read")
   read(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.markRead(user, id);
+  }
+
+  @Patch(":id/messages/:messageId")
+  edit(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("messageId") messageId: string,
+    @Body() dto: EditMessageDto,
+  ) {
+    return this.service.editMessage(user, id, messageId, dto.body);
+  }
+
+  @Delete(":id/messages/:messageId")
+  remove(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("messageId") messageId: string,
+  ) {
+    return this.service.deleteMessage(user, id, messageId);
+  }
+
+  @Post(":id/messages/:messageId/react")
+  react(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("messageId") messageId: string,
+    @Body() dto: ReactDto,
+  ) {
+    return this.service.reactToMessage(user, id, messageId, dto.emoji);
+  }
+
+  @Post(":id/typing")
+  typing(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: TypingDto,
+  ) {
+    return this.service.setTyping(user, id, dto.typing !== false);
   }
 }

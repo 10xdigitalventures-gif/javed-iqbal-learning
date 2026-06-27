@@ -96,6 +96,21 @@ export class LibraryService {
     return progress;
   }
 
+  // Audiobooks the listener has started but not finished — powers
+  // "Continue listening". Audiobooks are books whose category name contains
+  // "audio"; we surface rows that have a saved playback offset.
+  async continueListening(userId: string) {
+    const progress = await this.prisma.readingProgress.findMany({
+      where: { userId, isCompleted: false, audioPositionSec: { gt: 0 } },
+      include: { book: { include: { category: true } } },
+      orderBy: { lastReadAt: "desc" },
+      take: 20,
+    });
+    return progress.filter((p) =>
+      (p.book?.category?.name || "").toLowerCase().includes("audio"),
+    );
+  }
+
   // ---- Secure content delivery ----
   // Returns user-bound AES-256-GCM ciphertext for a chapter (or the whole book).
   // In production `contentKey` resolves to the protected source in object
@@ -179,11 +194,15 @@ export class LibraryService {
       chaptersCompleted:
         dto.chaptersCompleted ?? existing?.chaptersCompleted ?? 0,
       readingSeconds,
+      lastAudioChapterId:
+        dto.lastAudioChapterId ?? existing?.lastAudioChapterId ?? null,
+      audioPositionSec:
+        dto.lastAudioPositionSec ?? existing?.audioPositionSec ?? 0,
       isCompleted:
         dto.isCompleted ??
         (dto.percentComplete != null
           ? dto.percentComplete >= 100
-          : existing?.isCompleted ?? false),
+          : (existing?.isCompleted ?? false)),
       lastReadAt: new Date(),
     };
     return this.prisma.readingProgress.upsert({
@@ -341,11 +360,13 @@ export class LibraryService {
 
     // Retrieve secure signed URL from storage abstraction layer (valid for 1 hour)
     const signedUrl = await this.storage.getSignedUrl(contentKey, 3600);
-    
+
     // Auto-detect based on file extension
-    const mimeType = contentKey.endsWith('.pdf') ? 'application/pdf' 
-                   : contentKey.endsWith('.mp4') ? 'video/mp4' 
-                   : 'application/octet-stream';
+    const mimeType = contentKey.endsWith(".pdf")
+      ? "application/pdf"
+      : contentKey.endsWith(".mp4")
+        ? "video/mp4"
+        : "application/octet-stream";
 
     return {
       bookId,

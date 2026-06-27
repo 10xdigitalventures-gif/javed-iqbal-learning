@@ -5,6 +5,7 @@ import { PaymentProvidersService } from "./payment-providers.service";
 import { MockProvider } from "./providers/mock.provider";
 import { GoPayFastProvider } from "./providers/gopayfast.provider";
 import { WhopProvider } from "./providers/whop.provider";
+import { BankTransferProvider } from "./providers/bank-transfer.provider";
 import { PurchasesModule } from "../purchases/purchases.module";
 import { OrdersModule } from "../orders/orders.module";
 import { NotificationsModule } from "../notifications/notifications.module";
@@ -17,6 +18,7 @@ import { NotificationsModule } from "../notifications/notifications.module";
     MockProvider,
     GoPayFastProvider,
     WhopProvider,
+    BankTransferProvider,
   ],
   controllers: [PaymentsController],
   exports: [PaymentsService],

@@ -1,5 +1,11 @@
 import React, { useCallback, useState } from "react";
-import { FlatList, Text, TouchableOpacity, View, StyleSheet } from "react-native";
+import {
+  FlatList,
+  Text,
+  TouchableOpacity,
+  View,
+  StyleSheet,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { api } from "../api";
@@ -31,6 +37,10 @@ function previewOf(m: any): { icon?: any; text: string } {
     return { icon: "mic", text: "Voice message " + fmtDur(m.durationSec) };
   if (m.type === "VIDEO")
     return { icon: "videocam", text: "Video " + fmtDur(m.durationSec) };
+  if (m.type === "IMAGE") return { icon: "image", text: "Photo" };
+  if (m.type === "FILE")
+    return { icon: "document", text: m.fileName || "File" };
+  if (m.deletedAt) return { text: "Message deleted" };
   return { text: m.body || "" };
 }
 
@@ -104,7 +114,11 @@ export default function MessagesScreen({ navigation }: any) {
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 16 },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   name: { fontWeight: "600", color: colors.text, flex: 1, marginRight: 8 },
   when: { color: colors.muted, fontSize: 12 },
   previewRow: { flexDirection: "row", alignItems: "center", marginTop: 3 },

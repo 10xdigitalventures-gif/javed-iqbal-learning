@@ -13,6 +13,23 @@ import { StorageService } from "../media/storage.service";
 import { AuthUser, assertParticipant } from "../common/access";
 import { SendMessageDto } from "./dto";
 
+// Message types that carry an uploaded attachment (require a media key).
+const MEDIA_TYPES: MessageType[] = [
+  MessageType.AUDIO,
+  MessageType.VIDEO,
+  MessageType.IMAGE,
+  MessageType.FILE,
+];
+
+// Prisma include used everywhere a full message is returned (reactions + the
+// message it replies to).
+const MESSAGE_INCLUDE = {
+  reactions: true,
+  replyTo: {
+    include: { sender: { select: { id: true, name: true } } },
+  },
+} as const;
+
 // App-wide hard cap on text message length (clients also enforce this in the UI).
 const TEXT_CHAR_LIMIT = 2000;
 
@@ -28,9 +45,20 @@ export class MessagingService {
 
   // Replace a message's stored media key with a freshly signed, expiring URL so
   // playback links never go stale (the DB only ever stores the stable key).
-  private withSignedMedia<T extends { mediaUrl?: string | null }>(message: T): T {
+  private withSignedMedia<T extends { mediaUrl?: string | null }>(
+    message: T,
+  ): T {
     if (!message?.mediaUrl) return message;
     return { ...message, mediaUrl: this.storage.signedUrl(message.mediaUrl) };
+  }
+
+  // Sign the message media and (if present) the quoted reply's media too.
+  private serialize<T extends { mediaUrl?: string | null; replyTo?: any }>(
+    message: T,
+  ): T {
+    const signed: any = this.withSignedMedia(message);
+    if (signed.replyTo) signed.replyTo = this.withSignedMedia(signed.replyTo);
+    return signed;
   }
 
   // Get (or create) the single conversation between a client and consultant.
@@ -38,7 +66,10 @@ export class MessagingService {
     const client = await this.prisma.user.findFirst({
       where: { id: clientId, role: Role.CLIENT, isActive: true },
     });
-    if (!client) throw new ForbiddenException("Only active clients can start conversations");
+    if (!client)
+      throw new ForbiddenException(
+        "Only active clients can start conversations",
+      );
 
     const consultant = await this.prisma.user.findFirst({
       where: { id: consultantId, role: Role.CONSULTANT, isActive: true },
@@ -82,14 +113,17 @@ export class MessagingService {
       include: {
         client: { select: { id: true, name: true, avatarUrl: true } },
         consultant: { select: { id: true, name: true, avatarUrl: true } },
-        messages: { orderBy: { createdAt: "asc" } },
+        messages: {
+          orderBy: { createdAt: "asc" },
+          include: MESSAGE_INCLUDE,
+        },
       },
     });
     if (!convo) throw new NotFoundException("Conversation not found");
     assertParticipant(user, convo.clientId, convo.consultantId);
     return {
       ...convo,
-      messages: convo.messages.map((m) => this.withSignedMedia(m)),
+      messages: convo.messages.map((m) => this.serialize(m)),
     };
   }
 
@@ -151,8 +185,18 @@ export class MessagingService {
     const mediaKey =
       this.storage.extractKey(dto.mediaKey) ??
       this.storage.extractKey(dto.mediaUrl);
-    if ((dto.type === MessageType.AUDIO || dto.type === MessageType.VIDEO) && !mediaKey) {
+    if (MEDIA_TYPES.includes(dto.type) && !mediaKey) {
       throw new BadRequestException(`${dto.type} message requires mediaKey`);
+    }
+
+    // Validate the quoted message belongs to this same conversation.
+    if (dto.replyToId) {
+      const parent = await this.prisma.message.findUnique({
+        where: { id: dto.replyToId },
+      });
+      if (!parent || parent.conversationId !== conversationId) {
+        throw new BadRequestException("Cannot reply to that message");
+      }
     }
 
     const message = await this.prisma.message.create({
@@ -163,9 +207,12 @@ export class MessagingService {
         type: dto.type,
         body: dto.body,
         mediaUrl: mediaKey,
+        fileName: dto.fileName ?? null,
         durationSec: dto.durationSec,
+        replyToId: dto.replyToId ?? null,
         status: MessageStatus.SENT,
       },
+      include: MESSAGE_INCLUDE,
     });
 
     if (purchaseId) await this.usage.consume(purchaseId, kind);
@@ -176,7 +223,7 @@ export class MessagingService {
 
     // Push the new message to both participants in real time (SSE) with a
     // signed media URL so the recipient can play it immediately.
-    const signed = this.withSignedMedia(message);
+    const signed = this.serialize(message);
     for (const participantId of [convo.clientId, convo.consultantId]) {
       this.realtime.emit(participantId, "message", {
         conversationId,
@@ -190,7 +237,10 @@ export class MessagingService {
     await this.notifications.create(recipientId, {
       type: "NEW_MESSAGE",
       title: "New message",
-      body: dto.type === MessageType.TEXT ? dto.body : `New ${dto.type.toLowerCase()} message`,
+      body:
+        dto.type === MessageType.TEXT
+          ? dto.body
+          : `New ${dto.type.toLowerCase()} message`,
       email: true,
     });
 
@@ -208,6 +258,157 @@ export class MessagingService {
       data: { status: MessageStatus.READ },
     });
     return { ok: true };
+  }
+
+  // Edit the text body of one's own message.
+  async editMessage(
+    user: AuthUser,
+    conversationId: string,
+    messageId: string,
+    body: string,
+  ) {
+    const { convo, message } = await this.loadOwnMessage(
+      user,
+      conversationId,
+      messageId,
+    );
+    if (message.type !== MessageType.TEXT)
+      throw new BadRequestException("Only text messages can be edited");
+    if (message.deletedAt)
+      throw new BadRequestException("Cannot edit a deleted message");
+    if (!body?.trim())
+      throw new BadRequestException("Message body is required");
+    if (body.length > TEXT_CHAR_LIMIT)
+      throw new BadRequestException(
+        "Text message exceeds the " + TEXT_CHAR_LIMIT + "-character limit.",
+      );
+
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { body, editedAt: new Date() },
+      include: MESSAGE_INCLUDE,
+    });
+    const signed = this.serialize(updated);
+    for (const participantId of [convo.clientId, convo.consultantId]) {
+      this.realtime.emit(participantId, "message:update", {
+        conversationId,
+        message: signed,
+      });
+    }
+    return signed;
+  }
+
+  // Soft-delete one's own message (kept as a "message deleted" placeholder).
+  async deleteMessage(
+    user: AuthUser,
+    conversationId: string,
+    messageId: string,
+  ) {
+    const { convo } = await this.loadOwnMessage(
+      user,
+      conversationId,
+      messageId,
+    );
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        deletedAt: new Date(),
+        body: null,
+        mediaUrl: null,
+        fileName: null,
+      },
+      include: MESSAGE_INCLUDE,
+    });
+    const signed = this.serialize(updated);
+    for (const participantId of [convo.clientId, convo.consultantId]) {
+      this.realtime.emit(participantId, "message:update", {
+        conversationId,
+        message: signed,
+      });
+    }
+    return signed;
+  }
+
+  // Toggle an emoji reaction by the current user on a message.
+  async reactToMessage(
+    user: AuthUser,
+    conversationId: string,
+    messageId: string,
+    emoji: string,
+  ) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!convo) throw new NotFoundException("Conversation not found");
+    assertParticipant(user, convo.clientId, convo.consultantId);
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+    if (!message || message.conversationId !== conversationId)
+      throw new NotFoundException("Message not found");
+    if (!emoji?.trim()) throw new BadRequestException("Emoji is required");
+
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: {
+        messageId_userId_emoji: { messageId, userId: user.userId, emoji },
+      },
+    });
+    if (existing) {
+      await this.prisma.messageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await this.prisma.messageReaction.create({
+        data: { messageId, userId: user.userId, emoji },
+      });
+    }
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+    });
+    for (const participantId of [convo.clientId, convo.consultantId]) {
+      this.realtime.emit(participantId, "message:reaction", {
+        conversationId,
+        messageId,
+        reactions,
+      });
+    }
+    return reactions;
+  }
+
+  // Broadcast a transient typing indicator to the other participant (no DB).
+  async setTyping(user: AuthUser, conversationId: string, typing: boolean) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!convo) throw new NotFoundException("Conversation not found");
+    assertParticipant(user, convo.clientId, convo.consultantId);
+    const otherId =
+      user.userId === convo.clientId ? convo.consultantId : convo.clientId;
+    this.realtime.emit(otherId, "typing", {
+      conversationId,
+      userId: user.userId,
+      typing,
+    });
+    return { ok: true };
+  }
+
+  // Load a message and assert the current user is its sender + a participant.
+  private async loadOwnMessage(
+    user: AuthUser,
+    conversationId: string,
+    messageId: string,
+  ) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!convo) throw new NotFoundException("Conversation not found");
+    assertParticipant(user, convo.clientId, convo.consultantId);
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+    if (!message || message.conversationId !== conversationId)
+      throw new NotFoundException("Message not found");
+    if (message.senderId !== user.userId)
+      throw new ForbiddenException("You can only modify your own messages");
+    return { convo, message };
   }
 
   private kindOf(type: MessageType): "text" | "audio" | "video" {

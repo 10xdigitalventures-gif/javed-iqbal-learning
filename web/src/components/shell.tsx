@@ -6,12 +6,17 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import clsx from "clsx";
 import {
+  Award,
+  BarChart3,
   Bell,
   BookOpen,
   CalendarClock,
+  Compass,
   CreditCard,
+  Crown,
   GraduationCap,
   Headphones,
+  Images,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -33,6 +38,8 @@ const nav = {
     { href: "/admin/communities", label: "Communities", icon: MessageSquare },
     { href: "/admin/ebooks", label: "E-Books", icon: BookOpen },
     { href: "/admin/courses", label: "Courses", icon: GraduationCap },
+    { href: "/admin/reports", label: "Reports", icon: BarChart3 },
+    { href: "/admin/media", label: "Media Library", icon: Images },
     { href: "/admin/settings", label: "Settings", icon: Settings },
   ],
   CONSULTANT: [
@@ -40,16 +47,23 @@ const nav = {
     { href: "/consultant/clients", label: "Clients", icon: Users },
     { href: "/consultant/messages", label: "Messages", icon: MessageSquare },
     { href: "/consultant/meetings", label: "Meetings", icon: CalendarClock },
-    { href: "/consultant/availability", label: "Availability", icon: CalendarClock },
+    {
+      href: "/consultant/availability",
+      label: "Availability",
+      icon: CalendarClock,
+    },
     { href: "/consultant/communities", label: "Communities", icon: Users },
     { href: "/consultant/notifications", label: "Notifications", icon: Bell },
   ],
   CLIENT: [
     { href: "/client", label: "Dashboard", icon: LayoutDashboard },
     { href: "/client/consultants", label: "Consultants", icon: Users },
+    { href: "/client/explore", label: "Explore", icon: Compass },
     { href: "/client/library", label: "My Library", icon: BookOpen },
     { href: "/client/audiobooks", label: "Audio Books", icon: Headphones },
     { href: "/client/courses", label: "Courses", icon: GraduationCap },
+    { href: "/client/certificates", label: "Certificates", icon: Award },
+    { href: "/client/subscription", label: "Subscription", icon: Crown },
     { href: "/client/packages", label: "Packages", icon: Package },
     { href: "/client/messages", label: "Messages", icon: MessageSquare },
     { href: "/client/meetings", label: "Meetings", icon: CalendarClock },
@@ -57,9 +71,18 @@ const nav = {
     { href: "/client/communities", label: "Communities", icon: Users },
     { href: "/client/notifications", label: "Notifications", icon: Bell },
   ],
-} satisfies Record<Role, Array<{ href: string; label: string; icon: typeof LayoutDashboard }>>;
+} satisfies Record<
+  Role,
+  Array<{ href: string; label: string; icon: typeof LayoutDashboard }>
+>;
 
-export function Shell({ children, role }: { children: React.ReactNode; role: Role }) {
+export function Shell({
+  children,
+  role,
+}: {
+  children: React.ReactNode;
+  role: Role;
+}) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -81,7 +104,9 @@ export function Shell({ children, role }: { children: React.ReactNode; role: Rol
           </div>
           <div>
             <p className="text-sm font-bold text-slate-950">Consult Hub</p>
-            <p className="text-xs text-slate-500">{role.toLowerCase()} portal</p>
+            <p className="text-xs text-slate-500">
+              {role.toLowerCase()} portal
+            </p>
           </div>
         </div>
         <nav className="space-y-1" aria-label="Main navigation">
@@ -132,8 +157,12 @@ export function PageHeader({
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-950">{title}</h1>
-        {subtitle ? <p className="mt-1 text-sm text-slate-600">{subtitle}</p> : null}
+        <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+          {title}
+        </h1>
+        {subtitle ? (
+          <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
+        ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

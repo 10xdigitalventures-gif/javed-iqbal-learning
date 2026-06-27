@@ -22,6 +22,11 @@ export class CreatePlanDto {
   @IsOptional() @IsArray() features?: string[];
 }
 
+export class ChangePlanDto {
+  // Display currency only; the charge is always in the plan's own currency.
+  @IsOptional() @IsString() currency?: string;
+}
+
 export class UpdatePlanDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() description?: string;

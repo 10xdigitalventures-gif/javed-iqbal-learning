@@ -3,7 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { LearningProductKind } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { OrdersService } from "../orders/orders.service";
 import { AuthUser, isAdmin } from "../common/access";
 import {
   CreateCommentDto,
@@ -14,7 +16,10 @@ import {
 
 @Injectable()
 export class CommunitiesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private orders: OrdersService,
+  ) {}
 
   // --- Admin management ---
   listAll() {
@@ -76,15 +81,40 @@ export class CommunitiesService {
     return c;
   }
 
+  // Join a community. Free communities (and admins) join immediately. Paid
+  // communities return a paymentId so the client can route to the existing
+  // gateway-selection checkout; membership is granted by OrdersService.fulfill()
+  // once the payment webhook confirms.
   async join(user: AuthUser, communityId: string) {
-    await this.get(communityId);
-    return this.prisma.communityMember.upsert({
-      where: {
-        communityId_userId: { communityId, userId: user.userId },
-      },
-      update: {},
-      create: { communityId, userId: user.userId },
+    const community = await this.get(communityId);
+
+    const existing = await this.prisma.communityMember.findUnique({
+      where: { communityId_userId: { communityId, userId: user.userId } },
     });
+    if (existing) return { joined: true, membership: existing };
+
+    if (isAdmin(user) || !community.isPaid || community.price <= 0) {
+      const membership = await this.prisma.communityMember.upsert({
+        where: { communityId_userId: { communityId, userId: user.userId } },
+        update: {},
+        create: { communityId, userId: user.userId },
+      });
+      return { joined: true, membership };
+    }
+
+    const { order, payment, itemName } = await this.orders.create(user.userId, {
+      kind: LearningProductKind.COMMUNITY,
+      communityId,
+    });
+    return {
+      joined: false,
+      requiresPayment: true,
+      paymentId: payment.id,
+      orderId: order.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      itemName,
+    };
   }
 
   async leave(user: AuthUser, communityId: string) {
@@ -133,11 +163,7 @@ export class CommunitiesService {
     });
   }
 
-  async createPost(
-    user: AuthUser,
-    communityId: string,
-    dto: CreatePostDto,
-  ) {
+  async createPost(user: AuthUser, communityId: string, dto: CreatePostDto) {
     if (!(await this.isMember(user, communityId)))
       throw new ForbiddenException("Join this community to post");
     return this.prisma.communityPost.create({

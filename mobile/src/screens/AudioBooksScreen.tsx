@@ -16,6 +16,7 @@ import { api } from "../api";
 import { Loading } from "../components";
 import { colors, radius, spacing, shadow } from "../theme";
 import { BookCover, EmptyState, Pill, ProgressBar, formatPrice } from "../ui";
+import { useContentProtection } from "../protect";
 
 const arr = (x: any) => (Array.isArray(x) ? x : x?.items || x?.data || []);
 
@@ -37,6 +38,8 @@ function fmt(ms: number) {
 
 export default function AudioBooksScreen() {
   const nav = useNavigation<any>();
+  // Block screenshots / screen recording while protected audiobooks play.
+  useContentProtection();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"mine" | "browse">("browse");
   const [books, setBooks] = useState<any[]>([]);
@@ -46,6 +49,9 @@ export default function AudioBooksScreen() {
   // ---- player state ----
   const soundRef = useRef<Audio.Sound | null>(null);
   const sleepRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Throttle for progress saves + the position (ms) to resume the next load at.
+  const saveRef = useRef(0);
+  const resumeMsRef = useRef(0);
   const [active, setActive] = useState<any | null>(null);
   const [chapters, setChapters] = useState<any[]>([]);
   const [chapterId, setChapterId] = useState<string | null>(null);
@@ -95,6 +101,30 @@ export default function AudioBooksScreen() {
     if (sound) await sound.unloadAsync().catch(() => {});
   }
 
+  // Persist the listening position (throttled) so the book resumes later.
+  function saveAudioProgress(
+    book: any,
+    chId: string | null,
+    posMs: number,
+    durMs: number,
+    force: boolean,
+  ) {
+    if (!book) return;
+    const now = Date.now();
+    if (!force && now - saveRef.current < 10000) return;
+    saveRef.current = now;
+    const pos = Math.round((posMs || 0) / 1000);
+    const dur = Math.round((durMs || 0) / 1000);
+    api(`/library/progress/${book.id}`, {
+      method: "PUT",
+      body: {
+        lastAudioPositionSec: pos,
+        lastAudioChapterId: chId || undefined,
+        percentComplete: dur ? Math.min(100, (pos / dur) * 100) : undefined,
+      },
+    }).catch(() => {});
+  }
+
   async function playMedia(book: any, chId: string | null) {
     setBuffering(true);
     setPlayerError(null);
@@ -102,9 +132,17 @@ export default function AudioBooksScreen() {
       await unload();
       const qs = chId ? `?chapterId=${encodeURIComponent(chId)}` : "";
       const media: any = await api(`/library/media/${book.id}${qs}`);
+      // Resume from the saved position; consumed once so chapter switches start fresh.
+      const startAtMs = resumeMsRef.current;
+      resumeMsRef.current = 0;
       const { sound } = await Audio.Sound.createAsync(
         { uri: media.url },
-        { shouldPlay: true, rate: SPEEDS[speedIdx], shouldCorrectPitch: true },
+        {
+          shouldPlay: true,
+          rate: SPEEDS[speedIdx],
+          shouldCorrectPitch: true,
+          positionMillis: startAtMs > 0 ? startAtMs : 0,
+        },
         (st: any) => {
           if (!st) return;
           if (st.isLoaded) {
@@ -112,7 +150,23 @@ export default function AudioBooksScreen() {
             setPosition(st.positionMillis || 0);
             setDuration(st.durationMillis || 0);
             setBuffering(!!st.isBuffering);
-            if (st.didJustFinish) setIsPlaying(false);
+            saveAudioProgress(
+              book,
+              chId,
+              st.positionMillis,
+              st.durationMillis,
+              false,
+            );
+            if (st.didJustFinish) {
+              setIsPlaying(false);
+              saveAudioProgress(
+                book,
+                chId,
+                st.positionMillis,
+                st.durationMillis,
+                true,
+              );
+            }
           } else if (st.error) {
             setPlayerError("Playback error");
           }
@@ -137,14 +191,26 @@ export default function AudioBooksScreen() {
     setDuration(0);
     setSpeedIdx(0);
     setSleepMin(0);
-    // Try to load chapters so the listener can jump between episodes.
+    // Load chapters + saved progress together so playback can resume.
     let chs: any[] = [];
+    let prog: any = null;
     try {
-      const detail: any = await api(`/books/${book.slug || book.id}`);
+      const [detail, p]: any = await Promise.all([
+        api(`/books/${book.slug || book.id}`),
+        api(`/library/progress/${book.id}`).catch(() => null),
+      ]);
       chs = arr(detail?.chapters);
+      prog = p;
     } catch {}
     setChapters(chs);
-    playMedia(book, chs.length ? chs[0].id : null);
+    resumeMsRef.current = (prog?.lastAudioPositionSec || 0) * 1000;
+    saveRef.current = 0;
+    // Resume on the saved chapter when it still exists, else the first one.
+    const savedCh =
+      prog?.lastAudioChapterId &&
+      chs.find((c: any) => c.id === prog.lastAudioChapterId);
+    const startCh = savedCh ? savedCh.id : chs.length ? chs[0].id : null;
+    playMedia(book, startCh);
   }
 
   async function togglePlay() {
@@ -157,16 +223,17 @@ export default function AudioBooksScreen() {
   async function skip(deltaMs: number) {
     const sound = soundRef.current;
     if (!sound) return;
-    const next = Math.max(0, Math.min(duration || position, position + deltaMs));
+    const next = Math.max(
+      0,
+      Math.min(duration || position, position + deltaMs),
+    );
     await sound.setPositionAsync(next).catch(() => {});
   }
 
   async function cycleSpeed() {
     const next = (speedIdx + 1) % SPEEDS.length;
     setSpeedIdx(next);
-    await soundRef.current
-      ?.setRateAsync(SPEEDS[next], true)
-      .catch(() => {});
+    await soundRef.current?.setRateAsync(SPEEDS[next], true).catch(() => {});
   }
 
   function cycleSleep() {
@@ -186,6 +253,7 @@ export default function AudioBooksScreen() {
   }
 
   async function closePlayer() {
+    saveAudioProgress(active, chapterId, position, duration, true);
     await unload();
     setActive(null);
     setChapters([]);
@@ -292,7 +360,11 @@ export default function AudioBooksScreen() {
           <View style={s.player}>
             <View style={s.playerHandle} />
             <View style={s.playerTop}>
-              <BookCover url={active?.coverUrl} title={active?.title || ""} size="lg" />
+              <BookCover
+                url={active?.coverUrl}
+                title={active?.title || ""}
+                size="lg"
+              />
               <View style={s.playerInfo}>
                 <Text style={s.playerTitle} numberOfLines={2}>
                   {active?.title}
@@ -309,9 +381,7 @@ export default function AudioBooksScreen() {
               </TouchableOpacity>
             </View>
 
-            {playerError ? (
-              <Text style={s.error}>{playerError}</Text>
-            ) : null}
+            {playerError ? <Text style={s.error}>{playerError}</Text> : null}
 
             <View style={s.progressWrap}>
               <ProgressBar value={duration ? (position / duration) * 100 : 0} />
@@ -345,7 +415,11 @@ export default function AudioBooksScreen() {
 
             <View style={s.extras}>
               <TouchableOpacity style={s.extraBtn} onPress={cycleSpeed}>
-                <Ionicons name="speedometer-outline" size={18} color={colors.brand} />
+                <Ionicons
+                  name="speedometer-outline"
+                  size={18}
+                  color={colors.brand}
+                />
                 <Text style={s.extraText}>{speed}x</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.extraBtn} onPress={cycleSleep}>
@@ -359,7 +433,11 @@ export default function AudioBooksScreen() {
                   style={s.extraBtn}
                   onPress={() => setShowChapters(true)}
                 >
-                  <Ionicons name="list-outline" size={18} color={colors.brand} />
+                  <Ionicons
+                    name="list-outline"
+                    size={18}
+                    color={colors.brand}
+                  />
                   <Text style={s.extraText}>Chapters</Text>
                 </TouchableOpacity>
               ) : null}
@@ -395,7 +473,11 @@ export default function AudioBooksScreen() {
                       {i + 1}. {c.title}
                     </Text>
                     {c.id === chapterId ? (
-                      <Ionicons name="volume-high" size={16} color={colors.brand} />
+                      <Ionicons
+                        name="volume-high"
+                        size={16}
+                        color={colors.brand}
+                      />
                     ) : null}
                   </TouchableOpacity>
                 ))}
@@ -443,7 +525,11 @@ const s = StyleSheet.create({
   author: { fontSize: 12, color: colors.muted, marginTop: 2 },
   meta: { fontSize: 13, fontWeight: "700", color: colors.brand, marginTop: 4 },
 
-  playerBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
+  playerBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
   player: {
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.xl,
@@ -463,11 +549,20 @@ const s = StyleSheet.create({
   playerTop: { flexDirection: "row", gap: 14 },
   playerInfo: { flex: 1 },
   playerTitle: { fontSize: 17, fontWeight: "800", color: colors.text },
-  playerChapter: { fontSize: 13, color: colors.brand, marginTop: 4, fontWeight: "600" },
+  playerChapter: {
+    fontSize: 13,
+    color: colors.brand,
+    marginTop: 4,
+    fontWeight: "600",
+  },
   playerAuthor: { fontSize: 12, color: colors.muted, marginTop: 4 },
   error: { color: colors.red, fontSize: 13, marginTop: 12 },
   progressWrap: { marginTop: 20 },
-  timeRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },
+  timeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
   time: { fontSize: 12, color: colors.muted },
   controls: {
     flexDirection: "row",
@@ -476,7 +571,12 @@ const s = StyleSheet.create({
     gap: 36,
     marginTop: 18,
   },
-  skipLabel: { fontSize: 10, color: colors.muted, textAlign: "center", marginTop: -4 },
+  skipLabel: {
+    fontSize: 10,
+    color: colors.muted,
+    textAlign: "center",
+    marginTop: -4,
+  },
   playBtn: {
     width: 68,
     height: 68,
@@ -501,7 +601,11 @@ const s = StyleSheet.create({
     backgroundColor: colors.brandLight,
   },
   extraText: { fontSize: 13, fontWeight: "700", color: colors.brandDark },
-  chBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.4)" },
+  chBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
   chSheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.xl,
@@ -509,7 +613,12 @@ const s = StyleSheet.create({
     padding: spacing.lg,
     maxHeight: "70%",
   },
-  chTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginBottom: 12 },
+  chTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+    marginBottom: 12,
+  },
   chRow: {
     flexDirection: "row",
     alignItems: "center",

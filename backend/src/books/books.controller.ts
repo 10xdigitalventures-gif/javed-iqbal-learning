@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -6,9 +7,16 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { diskStorage } from "multer";
+import { extname } from "path";
+import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { Role } from "@prisma/client";
 import { BooksService } from "./books.service";
 import {
@@ -23,6 +31,10 @@ import {
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+
+const BOOK_UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
+if (!existsSync(BOOK_UPLOAD_DIR))
+  mkdirSync(BOOK_UPLOAD_DIR, { recursive: true });
 
 // Browsing the catalog requires a logged-in user; mutations require ADMIN.
 @Controller()
@@ -109,6 +121,29 @@ export class BooksController {
     return this.service.listBooks({ q, includeUnpublished: true });
   }
 
+  // Paginated / searchable / sortable list for the admin library table.
+  @Get("books/all/paged")
+  @Roles(Role.ADMIN)
+  listAllBooksPaged(
+    @Query("q") q?: string,
+    @Query("categoryId") categoryId?: string,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sort") sort?: string,
+    @Query("order") order?: string,
+  ) {
+    return this.service.listBooksPaged({
+      q,
+      categoryId,
+      status,
+      page,
+      pageSize,
+      sort,
+      order,
+    });
+  }
+
   @Get("books/:idOrSlug")
   getBook(@Param("idOrSlug") idOrSlug: string) {
     return this.service.getBook(idOrSlug);
@@ -155,6 +190,63 @@ export class BooksController {
     @Body() dto: CreateChapterDto,
   ) {
     return this.service.upsertChapter(bookId, dto);
+  }
+
+  // Admin chapter list including contentKey (for the chapter editor).
+  @Get("books/:bookId/chapters/admin")
+  @Roles(Role.ADMIN)
+  listChaptersAdmin(@Param("bookId") bookId: string) {
+    return this.service.listChaptersAdmin(bookId);
+  }
+
+  // Reorder chapters by passing the full ordered list of chapter ids.
+  @Put("books/:bookId/chapters/reorder")
+  @Roles(Role.ADMIN)
+  reorderChapters(
+    @Param("bookId") bookId: string,
+    @Body() body: { chapterIds: string[] },
+  ) {
+    return this.service.reorderChapters(bookId, body.chapterIds || []);
+  }
+
+  // Upload a PDF and auto-create chapters from its extracted text. Pass
+  // ?replace=false to append instead of replacing existing chapters. The PDF
+  // itself is never stored or rendered - only the extracted text is kept.
+  @Post("books/:bookId/import-pdf")
+  @Roles(Role.ADMIN)
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: diskStorage({
+        destination: BOOK_UPLOAD_DIR,
+        filename: (_req, file, cb) => {
+          const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+          cb(null, unique + extname(file.originalname));
+        },
+      }),
+      limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
+      fileFilter: (_req, file, cb) => {
+        const ok = file.mimetype === "application/pdf";
+        cb(ok ? null : new BadRequestException("Please upload a PDF file"), ok);
+      },
+    }),
+  )
+  async importPdf(
+    @Param("bookId") bookId: string,
+    @Query("replace") replace?: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException("PDF file is required");
+    try {
+      return await this.service.importPdfChapters(bookId, file.path, {
+        replace: replace !== "false",
+      });
+    } finally {
+      try {
+        unlinkSync(file.path);
+      } catch {
+        // best-effort temp cleanup
+      }
+    }
   }
 
   @Delete("chapters/:id")

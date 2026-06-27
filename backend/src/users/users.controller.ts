@@ -46,6 +46,29 @@ export class UsersController {
     return this.service.list(role);
   }
 
+  // Paginated, searchable, sortable list for admin tables.
+  @Get("paged")
+  @Roles(Role.ADMIN)
+  listPaged(
+    @Query("role") role?: Role,
+    @Query("q") q?: string,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sort") sort?: string,
+    @Query("order") order?: string,
+  ) {
+    return this.service.listPaged({
+      role,
+      q,
+      status,
+      page,
+      pageSize,
+      sort,
+      order,
+    });
+  }
+
   @Get(":id")
   @Roles(Role.ADMIN)
   get(@Param("id") id: string) {

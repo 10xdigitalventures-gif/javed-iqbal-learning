@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
+import { readFileSync } from "fs";
 import {
   CreateBookDto,
   CreateBundleDto,
@@ -97,6 +99,53 @@ export class BooksService {
       include: { category: true },
       orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
     });
+  }
+
+  // Paginated / searchable / sortable list for the admin library table.
+  async listBooksPaged(opts: {
+    q?: string;
+    categoryId?: string;
+    status?: string; // "published" | "draft"
+    page?: string | number;
+    pageSize?: string | number;
+    sort?: string;
+    order?: string;
+  }): Promise<Paginated<any>> {
+    const where: any = {};
+    if (opts.status === "published") where.isPublished = true;
+    if (opts.status === "draft") where.isPublished = false;
+    if (opts.categoryId) where.categoryId = opts.categoryId;
+    const term = (opts.q || "").trim();
+    if (term) {
+      where.OR = [
+        { title: { contains: term, mode: "insensitive" } },
+        { author: { contains: term, mode: "insensitive" } },
+        { description: { contains: term, mode: "insensitive" } },
+      ];
+    }
+
+    const orderBy = buildOrderBy(
+      opts.sort,
+      opts.order,
+      { title: "title", price: "price", createdAt: "createdAt" },
+      { createdAt: "desc" },
+    );
+    const { page, pageSize, skip, take } = parsePagination(
+      opts.page,
+      opts.pageSize,
+    );
+
+    const [rows, total] = await Promise.all([
+      this.prisma.book.findMany({
+        where,
+        include: { category: true },
+        orderBy,
+        skip,
+        take,
+      }),
+      this.prisma.book.count({ where }),
+    ]);
+    return { rows, total, page, pageSize };
   }
 
   async getBook(idOrSlug: string) {
@@ -209,6 +258,165 @@ export class BooksService {
   async deleteChapter(id: string) {
     await this.prisma.chapter.delete({ where: { id } });
     return { ok: true };
+  }
+
+  // Admin-only chapter list that INCLUDES contentKey (reader-facing getBook
+  // deliberately hides it). Powers the admin chapter editor.
+  async listChaptersAdmin(bookId: string) {
+    await this.getBook(bookId);
+    return this.prisma.chapter.findMany({
+      where: { bookId },
+      orderBy: { index: "asc" },
+    });
+  }
+
+  // Reassign chapter indexes to match the given order. Two-phase update inside
+  // a transaction avoids tripping the @@unique([bookId, index]) constraint
+  // while the indexes are being shuffled.
+  async reorderChapters(bookId: string, orderedIds: string[]) {
+    await this.getBook(bookId);
+    await this.prisma.$transaction(async (tx) => {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await tx.chapter.update({
+          where: { id: orderedIds[i] },
+          data: { index: 1000 + i },
+        });
+      }
+      for (let i = 0; i < orderedIds.length; i++) {
+        await tx.chapter.update({
+          where: { id: orderedIds[i] },
+          data: { index: i },
+        });
+      }
+    });
+    return this.listChaptersAdmin(bookId);
+  }
+
+  // ---- PDF import -> auto chapters (admin) ----
+  // Extract the text from an uploaded PDF and split it into chapters as a
+  // starting point the admin can rename/reorder/edit afterwards. The mobile app
+  // never renders the PDF itself - we only keep the extracted text per chapter.
+  async importPdfChapters(
+    bookId: string,
+    filePath: string,
+    opts: { replace?: boolean } = {},
+  ) {
+    await this.getBook(bookId);
+    // Require the lib's inner module directly to skip pdf-parse's debug index
+    // (which tries to read a bundled sample file when required normally).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (
+      b: Buffer,
+      o?: any,
+    ) => Promise<{ text: string; numpages: number }>;
+
+    let parsed: { text: string; numpages: number };
+    try {
+      const buf = readFileSync(filePath);
+      parsed = await pdfParse(buf);
+    } catch (err) {
+      throw new BadRequestException(
+        "Could not read this PDF: " + (err as Error).message,
+      );
+    }
+
+    const sections = this.splitTextIntoChapters(parsed.text || "");
+    if (!sections.length)
+      throw new BadRequestException(
+        "No readable text found in this PDF (it may be a scanned / image-only file).",
+      );
+
+    if (opts.replace !== false) {
+      await this.prisma.chapter.deleteMany({ where: { bookId } });
+    }
+    const offset =
+      opts.replace === false
+        ? ((
+            await this.prisma.chapter.aggregate({
+              where: { bookId },
+              _max: { index: true },
+            })
+          )._max.index ?? -1) + 1
+        : 0;
+
+    for (let i = 0; i < sections.length; i++) {
+      await this.prisma.chapter.create({
+        data: {
+          bookId,
+          index: offset + i,
+          title: sections[i].title,
+          contentKey: sections[i].content,
+        },
+      });
+    }
+    if (parsed.numpages) {
+      await this.prisma.book.update({
+        where: { id: bookId },
+        data: { pageCount: parsed.numpages },
+      });
+    }
+    return {
+      created: sections.length,
+      pages: parsed.numpages ?? null,
+      chapters: await this.listChaptersAdmin(bookId),
+    };
+  }
+
+  // Heuristic splitter: prefer real chapter headings; otherwise fall back to
+  // fixed-size text chunks. Either way the admin can adjust afterwards.
+  private splitTextIntoChapters(
+    raw: string,
+  ): Array<{ title: string; content: string }> {
+    const text = raw
+      .replace(/\r\n/g, "\n")
+      .replace(/\u0000/g, "")
+      .trim();
+    if (!text) return [];
+
+    const lines = text.split("\n");
+    const headingRe =
+      /^\s*(chapter\s+[0-9ivxlcdm]+|chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|part\s+[0-9ivxlcdm]+|unit\s+\d+|lesson\s+\d+|section\s+\d+)\b.*$/i;
+    const numberedRe = /^\s*\d{1,3}[.)]\s+\S.{0,80}$/;
+
+    const chapters: Array<{ title: string; content: string[] }> = [];
+    const maxChapters = 300;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const isHeading =
+        trimmed.length > 0 &&
+        trimmed.length <= 90 &&
+        (headingRe.test(trimmed) || numberedRe.test(trimmed));
+      if (isHeading && chapters.length < maxChapters) {
+        chapters.push({ title: trimmed.slice(0, 90), content: [] });
+      } else if (chapters.length) {
+        chapters[chapters.length - 1].content.push(line);
+      } else {
+        chapters.push({ title: "Introduction", content: [line] });
+      }
+    }
+
+    const cleaned = chapters
+      .map((c) => ({ title: c.title, content: c.content.join("\n").trim() }))
+      .filter((c) => c.content.length > 0);
+
+    if (cleaned.length >= 2) return cleaned;
+
+    // Fallback: no usable headings - chunk the whole text by size at paragraph
+    // boundaries so each chapter is a manageable block.
+    const chunkChars = Number(process.env.PDF_CHAPTER_CHUNK_CHARS || 6000);
+    const paragraphs = text.split(/\n\s*\n/);
+    const out: Array<{ title: string; content: string }> = [];
+    let buf = "";
+    for (const p of paragraphs) {
+      if (buf && buf.length + p.length > chunkChars) {
+        out.push({ title: `Section ${out.length + 1}`, content: buf.trim() });
+        buf = "";
+      }
+      buf += (buf ? "\n\n" : "") + p;
+    }
+    if (buf.trim())
+      out.push({ title: `Section ${out.length + 1}`, content: buf.trim() });
+    return out;
   }
 
   // ---- Bundles ----

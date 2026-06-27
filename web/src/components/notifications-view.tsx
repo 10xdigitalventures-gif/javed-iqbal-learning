@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Spinner } from "@/components/ui";
 import { PageHeader } from "@/components/shell";
+import { NotificationPreferences } from "@/components/notification-preferences";
 import type { Notification } from "@/lib/types";
 
 export function NotificationsView() {
@@ -35,6 +36,13 @@ export function NotificationsView() {
           </Button>
         }
       />
+      <div className="mb-6">
+        <NotificationPreferences />
+      </div>
+
+      <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+        Recent
+      </h2>
       <div className="space-y-2">
         {list.map((n) => (
           <Card key={n.id}>
