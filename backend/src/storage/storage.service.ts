@@ -3,23 +3,31 @@ import { IStorageProvider } from "./interfaces";
 import { SupabaseProvider } from "./supabase.provider";
 import { BunnyProvider } from "./bunny.provider";
 import { R2Provider } from "./r2.provider";
+import { S3Provider } from "./s3.provider";
 
 @Injectable()
 export class StorageService {
-  private provider: IStorageProvider;
+  private cached?: { name: string; instance: IStorageProvider };
 
-  constructor() {
-    const providerName = process.env.STORAGE_PROVIDER || "supabase";
-    
-    if (providerName === "supabase") {
-      this.provider = new SupabaseProvider();
-    } else if (providerName === "bunny") {
-      this.provider = new BunnyProvider();
-    } else if (providerName === "r2" || providerName === "s3") {
-      this.provider = new R2Provider();
+  // Resolve the active provider from the CURRENT env on each access (cached by
+  // name, rebuilt when STORAGE_PROVIDER changes) so switching providers in the
+  // admin Settings screen takes effect without a server restart.
+  private get provider(): IStorageProvider {
+    const name = (process.env.STORAGE_PROVIDER || "supabase").toLowerCase();
+    if (this.cached && this.cached.name === name) return this.cached.instance;
+    let instance: IStorageProvider;
+    if (name === "bunny") {
+      instance = new BunnyProvider();
+    } else if (name === "s3") {
+      // Real, dependency-free S3 implementation (AWS S3, Backblaze B2, MinIO).
+      instance = new S3Provider();
+    } else if (name === "r2") {
+      instance = new R2Provider();
     } else {
-      this.provider = new SupabaseProvider();
+      instance = new SupabaseProvider();
     }
+    this.cached = { name, instance };
+    return instance;
   }
 
   async uploadFile(path: string, file: Buffer, mimeType: string): Promise<string> {

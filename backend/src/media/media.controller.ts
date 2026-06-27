@@ -222,10 +222,19 @@ export class MediaController {
     const ownerId = isAdmin(user) ? undefined : user.userId;
     const items = await this.media.listAssets({ ownerId, type });
     return Promise.all(
-      items.map(async (it) => ({
-        ...it,
-        url: await this.urlForKey(it.key),
-      })),
+      items.map(async (it) => {
+        // A single missing/inaccessible object (e.g. a row whose bytes were
+        // never uploaded to the bucket) must not 500 the whole library. Return
+        // the item with a null url + error note so the rest still loads.
+        let url: string | null = null;
+        let urlError: string | null = null;
+        try {
+          url = await this.urlForKey(it.key);
+        } catch (e: any) {
+          urlError = e?.message || "Could not generate URL";
+        }
+        return { ...it, url, urlError };
+      }),
     );
   }
 
