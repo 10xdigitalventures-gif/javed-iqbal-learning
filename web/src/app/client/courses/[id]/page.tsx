@@ -500,18 +500,16 @@ export default function CourseDetailPage() {
                       )}
                     >
                       <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded-md bg-slate-100">
+                        <div className="flex h-full w-full items-center justify-center text-slate-400">
+                          <Icon className="h-5 w-5" />
+                        </div>
                         {l.thumbnailUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={l.thumbnailUrl}
+                          <MediaImg
+                            value={l.thumbnailUrl}
                             alt=""
-                            className="h-full w-full object-cover"
+                            className="absolute inset-0 h-full w-full object-cover"
                           />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-slate-400">
-                            <Icon className="h-5 w-5" />
-                          </div>
-                        )}
+                        ) : null}
                         {l.type === "VIDEO" ? (
                           <span className="absolute bottom-1 left-1 rounded bg-black/60 p-0.5">
                             <PlayCircle className="h-3 w-3 text-white" />
@@ -595,6 +593,7 @@ function LessonPlayer({
 }) {
   const [subTab, setSubTab] = useState<"details" | "attachments">("details");
   const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [playLoading, setPlayLoading] = useState(false);
   const [showMore, setShowMore] = useState(false);
 
@@ -635,10 +634,16 @@ function LessonPlayer({
   useEffect(() => {
     let cancelled = false;
     setPlayUrl(null);
+    setPosterUrl(null);
     setSubTab("details");
     setShowMore(false);
     didSeek.current = false;
     lastReport.current = 0;
+    // Resolve the lesson thumbnail (storage key or external URL) so it can be
+    // shown as the video poster before playback starts.
+    resolveMediaUrl(lesson.thumbnailUrl).then((u) => {
+      if (!cancelled) setPosterUrl(u);
+    });
     if (lesson.type === "VIDEO" || lesson.type === "PDF") {
       setPlayLoading(true);
       (async () => {
@@ -663,6 +668,7 @@ function LessonPlayer({
     lesson.source,
     lesson.contentKey,
     lesson.videoUrl,
+    lesson.thumbnailUrl,
   ]);
 
   const notesLines = (lesson.notes || "")
@@ -740,6 +746,7 @@ function LessonPlayer({
               <video
                 ref={videoRef}
                 src={embed.src}
+                poster={posterUrl || undefined}
                 controls
                 controlsList="nodownload noplaybackrate"
                 disablePictureInPicture
@@ -847,6 +854,33 @@ function LessonPlayer({
       </div>
     </>
   );
+}
+
+// Resolves a stored media value (storage key or external URL) and renders it as
+// an <img>, with the caller supplying a fallback behind it. Returns null until
+// the URL resolves so the fallback shows in the meantime.
+function MediaImg({
+  value,
+  alt,
+  className,
+}: {
+  value?: string | null;
+  alt: string;
+  className?: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    resolveMediaUrl(value).then((u) => {
+      if (!cancelled) setUrl(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+  if (!url) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={alt} className={className} />;
 }
 
 function Watermark({ text }: { text: string }) {

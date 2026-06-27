@@ -88,6 +88,22 @@ export class PaymentsController {
     try {
       const result = await this.service.buildRedirect(paymentId);
       if (result.formHtml) {
+        // This trusted, server-generated page auto-submits a hidden form to the
+        // payment gateway via an inline onload handler. Helmet's default CSP
+        // blocks both inline event handlers (script-src-attr 'none') and form
+        // POSTs to external origins (form-action 'self'), which left the buyer
+        // stuck on "Redirecting to PayFast...". Scope a relaxed CSP to just this
+        // response so the auto-submit and the cross-origin gateway POST work.
+        res.setHeader(
+          "Content-Security-Policy",
+          [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "script-src-attr 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "form-action 'self' https:",
+          ].join("; "),
+        );
         return res.type("html").send(result.formHtml);
       }
       return res.redirect(result.redirectUrl);
