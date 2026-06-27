@@ -64,6 +64,9 @@ function isMediaKey(v?: string | null): boolean {
 
 function ChapterManager({ bookId }: { bookId: string }) {
   const [chapters, setChapters] = useState<AdminChapter[]>([]);
+  // When true, the next PDF import runs through server-side OCR (for scanned or
+  // non-Unicode Urdu PDFs) instead of fast text extraction.
+  const importOcrRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -181,7 +184,7 @@ function ChapterManager({ bookId }: { bookId: string }) {
     }
   }
 
-  async function importPdf(file: File, replace: boolean) {
+  async function importPdf(file: File, replace: boolean, ocr = false) {
     setImporting(true);
     setImportMsg(null);
     setError(null);
@@ -190,7 +193,7 @@ function ChapterManager({ bookId }: { bookId: string }) {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch(
-        `${API_URL}/books/${bookId}/import-pdf?replace=${replace}`,
+        `${API_URL}/books/${bookId}/import-pdf?replace=${replace}&ocr=${ocr}`,
         {
           method: "POST",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -242,6 +245,21 @@ function ChapterManager({ bookId }: { bookId: string }) {
             )}
             Import PDF (auto chapters)
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              importOcrRef.current = true;
+              pdfInputRef.current?.click();
+            }}
+            disabled={importing}
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4" />
+            )}
+            Import PDF (Urdu OCR)
+          </Button>
           <input
             ref={pdfInputRef}
             type="file"
@@ -250,12 +268,14 @@ function ChapterManager({ bookId }: { bookId: string }) {
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (!f) return;
+              const ocr = importOcrRef.current;
+              importOcrRef.current = false;
               const replace =
                 chapters.length === 0 ||
                 confirm(
                   "Replace existing chapters with the PDF content? Click Cancel to append instead.",
                 );
-              importPdf(f, replace);
+              importPdf(f, replace, ocr);
             }}
           />
         </div>

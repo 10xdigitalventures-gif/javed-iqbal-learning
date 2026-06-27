@@ -2,6 +2,27 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
+// Media (image/video/file) URLs are signed by the BACKEND using its own
+// PUBLIC_API_URL env var. If that is misconfigured (e.g. left as localhost in
+// production), every signed URL points at localhost and images fail to load.
+// The frontend always knows the real API origin via NEXT_PUBLIC_API_URL, so we
+// rewrite any relative or localhost media URL onto that origin. This makes
+// images work regardless of the backend's PUBLIC_API_URL setting.
+function toAbsoluteMediaUrl(url?: string | null): string {
+  if (!url) return "";
+  try {
+    const apiOrigin = new URL(API_URL).origin;
+    if (url.startsWith("/")) return apiOrigin + url;
+    const u = new URL(url);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+      return apiOrigin + u.pathname + u.search;
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("token");
@@ -94,14 +115,16 @@ export async function uploadFile(file: File): Promise<UploadResult> {
     body: form,
   });
   if (!res.ok) throw new Error("Upload failed");
-  return res.json();
+  const data: UploadResult = await res.json();
+  return { ...data, url: toAbsoluteMediaUrl(data.url) };
 }
 
 // List Media Library items, optionally filtered by category
 // (image|video|audio|pdf|file).
 export async function listMedia(type?: string): Promise<MediaAsset[]> {
   const q = type ? `?type=${encodeURIComponent(type)}` : "";
-  return api<MediaAsset[]>(`/media/library${q}`);
+  const items = await api<MediaAsset[]>(`/media/library${q}`);
+  return items.map((it) => ({ ...it, url: toAbsoluteMediaUrl(it.url) }));
 }
 
 // Fetch a fresh signed playback URL for a stored object key.
@@ -109,14 +132,20 @@ export async function signMedia(key: string): Promise<string> {
   const res = await api<{ url: string }>(
     `/media/sign?key=${encodeURIComponent(key)}`,
   );
-  return res.url;
+  return toAbsoluteMediaUrl(res.url);
 }
 
 // Fetch a longer-lived shareable link for a Media Library item by id.
 export async function shareMedia(
   id: string,
 ): Promise<{ url: string; type: string; filename: string; mimeType: string }> {
-  return api(`/media/share/${id}`);
+  const res = await api<{
+    url: string;
+    type: string;
+    filename: string;
+    mimeType: string;
+  }>(`/media/share/${id}`);
+  return { ...res, url: toAbsoluteMediaUrl(res.url) };
 }
 
 // Resolve a stored media value to a usable URL: external links pass through
@@ -125,7 +154,7 @@ export async function resolveMediaUrl(
   value?: string | null,
 ): Promise<string | null> {
   if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
+  if (/^https?:\/\//i.test(value)) return toAbsoluteMediaUrl(value);
   try {
     return await signMedia(value);
   } catch {

@@ -2,15 +2,33 @@ import { IStorageProvider } from './interfaces';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { InternalServerErrorException } from '@nestjs/common';
 
+// The @supabase/supabase-js client needs the PROJECT REST URL
+// (e.g. https://<ref>.supabase.co), NOT the S3-compatibility endpoint
+// (https://<ref>.storage.supabase.co/storage/v1/s3). It is very easy to paste
+// the S3 endpoint into the "Supabase Project URL" field by mistake, which makes
+// every upload / signed URL malformed and all images appear broken. Normalise
+// the value defensively so either form works.
+export function normalizeSupabaseUrl(raw: string): string {
+  let u = (raw || '').trim();
+  if (!u) return u;
+  u = u.replace(/\/+$/, '');
+  // S3-compatibility host: https://<ref>.storage.supabase.co[/...] -> project URL
+  const s3Host = u.match(/^https?:\/\/([a-z0-9]+)\.storage\.supabase\.co/i);
+  if (s3Host) return `https://${s3Host[1]}.supabase.co`;
+  // Plain project host with an accidental /storage/v1[/s3] suffix.
+  u = u.replace(/\/storage\/v1(\/s3)?$/i, '');
+  return u;
+}
+
 export class SupabaseProvider implements IStorageProvider {
   private client: SupabaseClient | null = null;
   private bucket: string;
 
   constructor() {
-    const url = process.env.SUPABASE_URL || '';
+    const url = normalizeSupabaseUrl(process.env.SUPABASE_URL || '');
     const key = process.env.SUPABASE_KEY || '';
     this.bucket = process.env.SUPABASE_BUCKET || 'consult-hub';
-    
+
     if (url && key) {
       this.client = createClient(url, key);
     } else {

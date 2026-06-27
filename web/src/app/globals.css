@@ -31,3 +31,28 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Urdu / Nastaleeq support
+   The Jameel Noori Nastaleeq font is bundled in /public/fonts. Two ways to use:
+     1. Tailwind `font-urdu`  -> applies only the Nastaleeq typeface.
+     2. `.urdu-text` helper   -> full right-to-left Urdu block (RTL + roomy
+        Nastaleeq line height). Also auto-applies to any element with lang="ur".
+   Set these on chapter content, the e-book reader, headings, etc. as you like.
+--------------------------------------------------------------------------- */
+@font-face {
+  font-family: "Jameel Noori Nastaleeq";
+  src: url("/fonts/jameel-noori-nastaleeq.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+.urdu-text,
+[lang="ur"] {
+  font-family: "Jameel Noori Nastaleeq", "Noto Nastaliq Urdu", serif;
+  direction: rtl;
+  text-align: right;
+  line-height: 2.6;
+  font-size: 1.15em;
+}

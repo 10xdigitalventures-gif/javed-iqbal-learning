@@ -233,12 +233,14 @@ export class BooksController {
   async importPdf(
     @Param("bookId") bookId: string,
     @Query("replace") replace?: string,
+    @Query("ocr") ocr?: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException("PDF file is required");
     try {
       return await this.service.importPdfChapters(bookId, file.path, {
         replace: replace !== "false",
+        ocr: ocr === "true",
       });
     } finally {
       try {

@@ -13,6 +13,8 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
+        // Urdu / Nastaleeq typeface. Use the `font-urdu` class on any element.
+        urdu: ['"Jameel Noori Nastaleeq"', '"Noto Nastaliq Urdu"', "serif"],
       },
     },
   },

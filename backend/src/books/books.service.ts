@@ -299,31 +299,55 @@ export class BooksService {
   async importPdfChapters(
     bookId: string,
     filePath: string,
-    opts: { replace?: boolean } = {},
+    opts: { replace?: boolean; ocr?: boolean } = {},
   ) {
     await this.getBook(bookId);
-    // Require the lib's inner module directly to skip pdf-parse's debug index
-    // (which tries to read a bundled sample file when required normally).
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (
-      b: Buffer,
-      o?: any,
-    ) => Promise<{ text: string; numpages: number }>;
 
-    let parsed: { text: string; numpages: number };
-    try {
-      const buf = readFileSync(filePath);
-      parsed = await pdfParse(buf);
-    } catch (err) {
-      throw new BadRequestException(
-        "Could not read this PDF: " + (err as Error).message,
-      );
+    let text = "";
+    let numpages = 0;
+
+    // 1) Fast path: pull the embedded text layer with pdf-parse. Skipped when
+    // the admin forces OCR (scanned books, or PDFs built with non-Unicode
+    // "InPage / legacy Noori Nastaleeq" Urdu fonts whose text layer extracts as
+    // gibberish like "240\u00aa\u00e5\u00c5Z\u00edZzgZ8wOX20").
+    if (!opts.ocr) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (
+        b: Buffer,
+        o?: any,
+      ) => Promise<{ text: string; numpages: number }>;
+      try {
+        const buf = readFileSync(filePath);
+        const parsed = await pdfParse(buf);
+        text = parsed.text || "";
+        numpages = parsed.numpages || 0;
+      } catch {
+        // Fall through to OCR rather than failing outright.
+        text = "";
+      }
     }
 
-    const sections = this.splitTextIntoChapters(parsed.text || "");
+    // 2) OCR fallback: forced, or the extracted text is empty / unreadable
+    // gibberish. Renders each page to an image and runs Tesseract (Urdu+English
+    // by default) so we recover real Unicode text.
+    if (opts.ocr || !this.looksLikeReadableText(text)) {
+      if (!this.ocrAvailable())
+        throw new BadRequestException(
+          "This PDF needs OCR (it looks scanned or uses a non-Unicode Urdu font), " +
+            "but the OCR engine isn't installed on the server. Install Tesseract " +
+            "with the Urdu language pack (tesseract-ocr + the 'urd' traineddata), " +
+            "then import again.",
+        );
+      const ocr = await this.ocrPdfToText(filePath);
+      text = ocr.text;
+      numpages = numpages || ocr.pages;
+    }
+
+    const sections = this.splitTextIntoChapters(text);
     if (!sections.length)
       throw new BadRequestException(
-        "No readable text found in this PDF (it may be a scanned / image-only file).",
+        "No readable text found in this PDF, even after OCR. The scan quality may " +
+          "be too low, or the Urdu language pack may be missing on the server.",
       );
 
     if (opts.replace !== false) {
@@ -349,17 +373,99 @@ export class BooksService {
         },
       });
     }
-    if (parsed.numpages) {
+    if (numpages) {
       await this.prisma.book.update({
         where: { id: bookId },
-        data: { pageCount: parsed.numpages },
+        data: { pageCount: numpages },
       });
     }
     return {
       created: sections.length,
-      pages: parsed.numpages ?? null,
+      pages: numpages || null,
       chapters: await this.listChaptersAdmin(bookId),
     };
+  }
+
+  // True when extracted text reads like real prose (Latin or Urdu Unicode) and
+  // not legacy-font gibberish. Used to decide whether we must fall back to OCR.
+  private looksLikeReadableText(text: string): boolean {
+    const t = (text || "").trim();
+    if (t.length < 40) return false;
+    // Real Urdu/Arabic Unicode present -> definitely readable.
+    const urdu = (t.match(/[\u0600-\u06FF]/g) || []).length;
+    if (urdu > t.length * 0.04) return true;
+    // Otherwise it should read like normal Latin prose: enough whitespace and
+    // few "weird" accented/symbol chars. Legacy InPage extraction produces
+    // tokens like "240\u00aa\u00e5\u00c5Z\u00edZzgZ8wOX20" -> very high weird
+    // ratio and very low whitespace ratio.
+    const spaces = (t.match(/\s/g) || []).length;
+    const weird = (t.match(/[^\t\n\r\x20-\x7E\u0600-\u06FF]/g) || []).length;
+    return spaces / t.length > 0.08 && weird / t.length < 0.08;
+  }
+
+  // Whether the Tesseract OCR binary is available on this server.
+  private ocrAvailable(): boolean {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require("child_process").execFileSync("tesseract", ["--version"], {
+        stdio: "ignore",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Render the PDF to per-page images (poppler's pdftoppm) and OCR each page
+  // with Tesseract. Language defaults to Urdu+English (override with OCR_LANG);
+  // DPI defaults to 300 (override with OCR_DPI). NOTE: OCR is CPU-heavy and can
+  // take a while for large books \u2014 raise your reverse-proxy/server request
+  // timeout, or split very large PDFs, if the request times out.
+  private async ocrPdfToText(
+    filePath: string,
+  ): Promise<{ text: string; pages: number }> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { execFileSync } = require("child_process");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require("fs");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const os = require("os");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require("path");
+
+    const lang = process.env.OCR_LANG || "urd+eng";
+    const dpi = String(process.env.OCR_DPI || 300);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-ocr-"));
+    try {
+      // 1) PDF -> page-N.png images.
+      execFileSync(
+        "pdftoppm",
+        ["-r", dpi, "-png", filePath, path.join(dir, "page")],
+        { stdio: "ignore", maxBuffer: 1024 * 1024 * 64 },
+      );
+      const images: string[] = fs
+        .readdirSync(dir)
+        .filter((f: string) => f.toLowerCase().endsWith(".png"))
+        .sort();
+
+      // 2) OCR each page in order.
+      const parts: string[] = [];
+      for (const img of images) {
+        const out = execFileSync(
+          "tesseract",
+          [path.join(dir, img), "stdout", "-l", lang, "--psm", "6"],
+          { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 },
+        ) as string;
+        if (out && out.trim()) parts.push(out.trim());
+      }
+      return { text: parts.join("\n\n"), pages: images.length };
+    } finally {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort temp cleanup
+      }
+    }
   }
 
   // Heuristic splitter: prefer real chapter headings; otherwise fall back to
