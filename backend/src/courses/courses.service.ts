@@ -27,6 +27,15 @@ import {
   UpdateAssignmentDto,
   SubmitAssignmentDto,
   GradeSubmissionDto,
+  CreateOfferDto,
+  UpdateOfferDto,
+  CreateCouponDto,
+  UpdateCouponDto,
+  CreateCommentDto,
+  CreateBadgeDto,
+  UpdateBadgeDto,
+  CreateLiveSessionDto,
+  UpdateLiveSessionDto,
 } from "./dto";
 
 // Safely parse a JSON-encoded file list ([{ key, name, size }]) into an array.
