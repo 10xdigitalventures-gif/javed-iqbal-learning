@@ -3631,7 +3631,7 @@ function CourseSettings({
           within this many days or it stops playing until the device is online.
         </p>
 
-        {err && <ErrorText>{err}</ErrorText>}
+        {err && <ErrorText message={err} />}
         {ok && <p className="text-sm font-medium text-emerald-600">Saved.</p>}
         <Button onClick={save} disabled={saving}>
           {saving ? "Saving..." : "Save settings"}
