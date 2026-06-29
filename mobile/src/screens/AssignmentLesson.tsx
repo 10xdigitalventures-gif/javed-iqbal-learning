@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { api, uploadMedia } from "../api";
 import { colors, radius, spacing } from "../theme";
+import HtmlContent from "../HtmlContent";
 
 // A file attached to an assignment task or a learner submission.
 type SubFile = { key: string; name: string; size?: number };
@@ -199,10 +200,13 @@ export default function AssignmentLesson({
       </View>
 
       {tab === "details" ? (
-        <Text style={s.taskText}>
-          {assignment.description ||
-            "The instructor has not added task details yet."}
-        </Text>
+        <HtmlContent
+          html={
+            assignment.description ||
+            "The instructor has not added task details yet."
+          }
+          textStyle={s.taskText}
+        />
       ) : (
         <View>
           {refFiles.length === 0 ? (

@@ -31,6 +31,15 @@ export class CreateCourseDto {
   @IsOptional() @IsEnum(UnlockPolicy) unlockPolicy?: UnlockPolicy;
   // YouTube-style offline re-validation window (days).
   @IsOptional() @IsInt() @Min(1) offlineValidityDays?: number;
+  @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
+  @IsOptional() @IsString() instructorHeading?: string;
+  @IsOptional() @IsString() instructorName?: string;
+  @IsOptional() @IsString() instructorTitle?: string;
+  @IsOptional() @IsString() instructorBio?: string;
+  @IsOptional() @IsString() instructorAvatarUrl?: string;
+  @IsOptional() @IsBoolean() autoplayNext?: boolean;
+  @IsOptional() @IsBoolean() autoplayFirst?: boolean;
+  @IsOptional() @IsBoolean() autoComplete?: boolean;
 }
 
 export class UpdateCourseDto extends CreateCourseDto {

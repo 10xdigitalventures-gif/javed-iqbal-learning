@@ -115,6 +115,16 @@ type CourseDetail = {
   accessDurationDays?: number | null;
   unlockPolicy?: "OPEN" | "SEQUENTIAL" | "DRIP";
   offlineValidityDays?: number;
+  coverUrl?: string | null;
+  tags?: string[];
+  instructorHeading?: string | null;
+  instructorName?: string | null;
+  instructorTitle?: string | null;
+  instructorBio?: string | null;
+  instructorAvatarUrl?: string | null;
+  autoplayNext?: boolean;
+  autoplayFirst?: boolean;
+  autoComplete?: boolean;
   lessons: Lesson[];
   modules: ModuleT[];
   quizzes: any[];
@@ -3533,6 +3543,42 @@ function SubmissionRow({
 }
 
 // ---- Course access + unlock settings (admin) ----
+function SettingToggle({
+  checked,
+  onChange,
+  title,
+  desc,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-3 last:border-0">
+      <div className="pr-4">
+        <p className="text-sm font-medium text-slate-900">{title}</p>
+        <p className="mt-0.5 text-xs text-slate-500">{desc}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition ${
+          checked ? "bg-brand" : "bg-slate-300"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+            checked ? "left-[22px]" : "left-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function CourseSettings({
   course,
   onChanged,
@@ -3549,6 +3595,20 @@ function CourseSettings({
   const [offlineDays, setOfflineDays] = useState<number>(
     course.offlineValidityDays ?? 30,
   );
+  const [title, setTitle] = useState(course.title || "");
+  const [description, setDescription] = useState(course.description || "");
+  const [cover, setCover] = useState(course.coverUrl || "");
+  const [tagsInput, setTagsInput] = useState((course.tags || []).join(", "));
+  const [insHeading, setInsHeading] = useState(
+    course.instructorHeading || "Instructor",
+  );
+  const [insName, setInsName] = useState(course.instructorName || "");
+  const [insTitle, setInsTitle] = useState(course.instructorTitle || "");
+  const [insBio, setInsBio] = useState(course.instructorBio || "");
+  const [insAvatar, setInsAvatar] = useState(course.instructorAvatarUrl || "");
+  const [autoNext, setAutoNext] = useState(course.autoplayNext ?? true);
+  const [autoFirst, setAutoFirst] = useState(course.autoplayFirst ?? false);
+  const [autoDone, setAutoDone] = useState(course.autoComplete ?? true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
@@ -3561,6 +3621,21 @@ function CourseSettings({
       await api(`/courses/${course.id}`, {
         method: "PATCH",
         body: {
+          title: title.trim(),
+          description: description.trim() || null,
+          coverUrl: cover || null,
+          tags: tagsInput
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
+          instructorHeading: insHeading.trim() || null,
+          instructorName: insName.trim() || null,
+          instructorTitle: insTitle.trim() || null,
+          instructorBio: insBio.trim() || null,
+          instructorAvatarUrl: insAvatar || null,
+          autoplayNext: autoNext,
+          autoplayFirst: autoFirst,
+          autoComplete: autoDone,
           accessDurationDays: Number(duration) || 0,
           unlockPolicy: policy,
           offlineValidityDays: Number(offlineDays) || 30,
@@ -3578,6 +3653,122 @@ function CourseSettings({
   return (
     <Card>
       <div className="space-y-5">
+        {/* Basic details */}
+        <div className="space-y-4">
+          <div>
+            <h3 className="font-semibold text-slate-950">Basic details</h3>
+            <p className="text-sm text-slate-500">
+              The title, description and thumbnail learners see on the course
+              page and in their library.
+            </p>
+          </div>
+          <Input
+            label="Course title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <Textarea
+            label="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            placeholder="This description appears on the course detail and checkout pages..."
+          />
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-slate-700">
+              Course thumbnail
+            </p>
+            <ThumbnailField value={cover} onChange={setCover} />
+            <p className="mt-1 text-xs text-slate-400">
+              Shown on the course page and in the library. Recommended 1280x720.
+            </p>
+          </div>
+          <Input
+            label="Course tags"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="e.g. mindset, productivity, health (comma separated)"
+          />
+        </div>
+
+        <div className="border-t border-slate-100" />
+
+        {/* Instructor details */}
+        <div className="space-y-4">
+          <div>
+            <h3 className="font-semibold text-slate-950">Instructor details</h3>
+            <p className="text-sm text-slate-500">
+              Appears on the course detail and checkout pages.
+            </p>
+          </div>
+          <Input
+            label="Heading"
+            value={insHeading}
+            onChange={(e) => setInsHeading(e.target.value)}
+            placeholder="Instructor"
+          />
+          <Input
+            label="Name"
+            value={insName}
+            onChange={(e) => setInsName(e.target.value)}
+            placeholder="e.g. Dr Javed Iqbal"
+          />
+          <Input
+            label="Title"
+            value={insTitle}
+            onChange={(e) => setInsTitle(e.target.value)}
+            placeholder="e.g. Professor of Surgery & Medical Educator"
+          />
+          <Textarea
+            label="Bio"
+            value={insBio}
+            onChange={(e) => setInsBio(e.target.value)}
+            rows={4}
+            placeholder="Short instructor bio..."
+          />
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-slate-700">
+              Instructor headshot
+            </p>
+            <ThumbnailField value={insAvatar} onChange={setInsAvatar} />
+            <p className="mt-1 text-xs text-slate-400">
+              Recommended dimensions of 300x300.
+            </p>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100" />
+
+        {/* Learning experience */}
+        <div>
+          <h3 className="font-semibold text-slate-950">Learning experience</h3>
+          <p className="text-sm text-slate-500">
+            Control autoplay and how lessons get marked complete.
+          </p>
+          <div className="mt-3">
+            <SettingToggle
+              checked={autoNext}
+              onChange={setAutoNext}
+              title="Automatically play next lesson"
+              desc="When enabled, the next lesson starts automatically after the current one ends."
+            />
+            <SettingToggle
+              checked={autoFirst}
+              onChange={setAutoFirst}
+              title="Automatically play first lesson"
+              desc="When enabled, the first lesson in the course starts automatically when the course is opened."
+            />
+            <SettingToggle
+              checked={autoDone}
+              onChange={setAutoDone}
+              title="Auto complete lessons"
+              desc="When enabled, lessons are marked complete automatically as learners progress. When disabled, a lesson only completes after the learner clicks Mark as complete."
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100" />
+
         <div>
           <h3 className="font-semibold text-slate-950">Access &amp; unlock</h3>
           <p className="text-sm text-slate-500">

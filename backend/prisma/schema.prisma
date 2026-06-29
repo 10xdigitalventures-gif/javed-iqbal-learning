@@ -952,6 +952,18 @@ model Course {
   // reconnect to the server within this window or it stops playing until the
   // device is online again.
   offlineValidityDays Int @default(30)
+  // Course tags (filter/discovery)
+  tags                String[] @default([])
+  // Instructor details (shown on course detail + checkout)
+  instructorHeading   String?
+  instructorName      String?
+  instructorTitle     String?
+  instructorBio       String?
+  instructorAvatarUrl String?
+  // Learning experience
+  autoplayNext        Boolean  @default(true)
+  autoplayFirst       Boolean  @default(false)
+  autoComplete        Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

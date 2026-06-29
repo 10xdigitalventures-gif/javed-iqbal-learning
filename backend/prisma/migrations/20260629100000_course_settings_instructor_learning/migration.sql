@@ -1,0 +1,10 @@
+-- Course: tags, instructor details, learning-experience flags
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "tags" TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "instructorHeading" TEXT;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "instructorName" TEXT;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "instructorTitle" TEXT;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "instructorBio" TEXT;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "instructorAvatarUrl" TEXT;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "autoplayNext" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "autoplayFirst" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS "autoComplete" BOOLEAN NOT NULL DEFAULT true;

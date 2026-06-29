@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
-import { api, resolveMediaUrl } from "@/lib/api";
+import { api, resolveMediaUrl, uploadFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Card, Spinner, Badge, Button, ErrorText } from "@/components/ui";
 import {
@@ -46,6 +46,36 @@ type Lesson = {
   notes?: string | null;
   keyPoints?: string | null;
   attachments?: { name: string; key: string }[];
+  // Module this lesson belongs to (null = ungrouped).
+  moduleId?: string | null;
+  // Server-computed gating / progress flags.
+  locked?: boolean;
+  completed?: boolean;
+  lockReason?: string | null;
+  unlockAt?: string | null;
+  // Rich assignment payload (only on ASSIGNMENT lessons).
+  assignment?: AssignmentT | null;
+};
+
+type SubFileT = { key: string; name: string; size?: number };
+
+type AssignmentSubmissionT = {
+  id: string;
+  status: "UNDER_REVIEW" | "APPROVED" | "REJECTED";
+  answerText?: string | null;
+  attachments?: SubFileT[];
+  grade?: number | null;
+  feedback?: string | null;
+  submittedAt?: string;
+  reviewedAt?: string | null;
+};
+
+type AssignmentT = {
+  id: string;
+  title: string;
+  description?: string | null;
+  attachments?: SubFileT[];
+  mySubmission?: AssignmentSubmissionT | null;
 };
 
 type Question = {
@@ -72,6 +102,17 @@ type Instructor = {
   avatarUrl?: string | null;
 };
 
+type CourseModule = {
+  id: string;
+  title: string;
+  index: number;
+  locked?: boolean;
+  lockReason?: string | null;
+  unlockAt?: string | null;
+  completed?: boolean;
+  lessonIds?: string[];
+};
+
 type Course = {
   id: string;
   title: string;
@@ -81,6 +122,7 @@ type Course = {
   price: number;
   currency: string;
   lessons: Lesson[];
+  modules?: CourseModule[];
   quizzes?: Quiz[];
   hasAccess?: boolean;
   isEnrolled?: boolean;
@@ -161,7 +203,7 @@ export default function CourseDetailPage() {
   const [busy, setBusy] = useState(false);
 
   const [tab, setTab] = useState<"syllabus" | "details">("syllabus");
-  const [moduleOpen, setModuleOpen] = useState(true);
+  const [openModules, setOpenModules] = useState<Record<string, boolean>>({});
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [completed, setCompleted] = useState<string[]>([]);
@@ -459,101 +501,153 @@ export default function CourseDetailPage() {
             </Card>
           ) : null}
 
-          {/* Module accordion */}
-          <Card>
-            <button
-              onClick={() => setModuleOpen((v) => !v)}
-              className="flex w-full items-center justify-between text-left"
-            >
-              <div>
-                <p className="text-sm font-semibold text-slate-900">
-                  1: {course.title}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {lessons.length} lessons
-                </p>
-              </div>
-              <ChevronDown
-                className={clsx(
-                  "h-5 w-5 text-slate-400 transition-transform",
-                  moduleOpen ? "rotate-180" : "",
-                )}
-              />
-            </button>
-
-            {moduleOpen ? (
-              <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
-                {lessons.map((l) => {
-                  const Icon = lessonIcon[l.type] ?? FileText;
-                  const open = enrolled || l.isPreview;
-                  const locked = !open;
-                  const done = completed.includes(l.id);
+          {/* Modules */}
+          {(() => {
+            const mods = course.modules || [];
+            const groups =
+              mods.length > 0
+                ? mods.map((m) => ({
+                    key: m.id,
+                    title: m.title,
+                    items: lessons.filter((l) => l.moduleId === m.id),
+                  }))
+                : [];
+            const ungrouped = lessons.filter(
+              (l) => !l.moduleId || !mods.some((m) => m.id === l.moduleId),
+            );
+            if (ungrouped.length) {
+              groups.push({
+                key: "__ungrouped__",
+                title: mods.length ? "Other lessons" : course.title,
+                items: ungrouped,
+              });
+            }
+            return (
+              <div className="space-y-3">
+                {groups.map((g, gi) => {
+                  const isOpen = openModules[g.key] ?? true;
+                  const gDone =
+                    g.items.length > 0 &&
+                    g.items.every((l) => completed.includes(l.id));
                   return (
-                    <button
-                      key={l.id}
-                      type="button"
-                      onClick={() => openLesson(l)}
-                      disabled={locked}
-                      className={clsx(
-                        "flex w-full items-center gap-3 py-3 text-left transition",
-                        locked ? "cursor-not-allowed" : "hover:bg-slate-50",
-                      )}
-                    >
-                      <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded-md bg-slate-100">
-                        <div className="flex h-full w-full items-center justify-center text-slate-400">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                        {l.thumbnailUrl ? (
-                          <MediaImg
-                            value={l.thumbnailUrl}
-                            alt=""
-                            className="absolute inset-0 h-full w-full object-cover"
-                          />
-                        ) : null}
-                        {l.type === "VIDEO" ? (
-                          <span className="absolute bottom-1 left-1 rounded bg-black/60 p-0.5">
-                            <PlayCircle className="h-3 w-3 text-white" />
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-slate-800">
-                          {l.index + 1}. {l.title}
-                        </p>
-                        <div className="mt-0.5 flex items-center gap-2">
-                          <span className="text-[10px] font-semibold tracking-wide text-slate-400">
-                            {typeLabel[l.type]}
-                          </span>
-                          {l.durationSec ? (
-                            <span className="text-[10px] text-slate-400">
-                              · {Math.round(l.durationSec / 60)} min
-                            </span>
+                    <Card key={g.key}>
+                      <button
+                        onClick={() =>
+                          setOpenModules((prev) => ({
+                            ...prev,
+                            [g.key]: !(prev[g.key] ?? true),
+                          }))
+                        }
+                        className="flex w-full items-center justify-between text-left"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          {gDone ? (
+                            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
                           ) : null}
-                          {l.isPreview ? (
-                            <Badge color="amber">Preview</Badge>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">
+                              {gi + 1}: {g.title}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {g.items.length} lessons
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronDown
+                          className={clsx(
+                            "h-5 w-5 shrink-0 text-slate-400 transition-transform",
+                            isOpen ? "rotate-180" : "",
+                          )}
+                        />
+                      </button>
+
+                      {isOpen ? (
+                        <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
+                          {g.items.map((l) => {
+                            const Icon = lessonIcon[l.type] ?? FileText;
+                            const open = enrolled || l.isPreview;
+                            const locked = !open;
+                            const done = completed.includes(l.id);
+                            return (
+                              <button
+                                key={l.id}
+                                type="button"
+                                onClick={() => openLesson(l)}
+                                disabled={locked}
+                                className={clsx(
+                                  "flex w-full items-center gap-3 py-3 text-left transition",
+                                  locked
+                                    ? "cursor-not-allowed"
+                                    : "hover:bg-slate-50",
+                                )}
+                              >
+                                <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded-md bg-slate-100">
+                                  <div className="flex h-full w-full items-center justify-center text-slate-400">
+                                    <Icon className="h-5 w-5" />
+                                  </div>
+                                  {l.thumbnailUrl ? (
+                                    <MediaImg
+                                      value={l.thumbnailUrl}
+                                      alt=""
+                                      className="absolute inset-0 h-full w-full object-cover"
+                                    />
+                                  ) : null}
+                                  {l.type === "VIDEO" ? (
+                                    <span className="absolute bottom-1 left-1 rounded bg-black/60 p-0.5">
+                                      <PlayCircle className="h-3 w-3 text-white" />
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-slate-800">
+                                    {l.index + 1}. {l.title}
+                                  </p>
+                                  <div className="mt-0.5 flex items-center gap-2">
+                                    <span className="text-[10px] font-semibold tracking-wide text-slate-400">
+                                      {typeLabel[l.type]}
+                                    </span>
+                                    {l.durationSec ? (
+                                      <span className="text-[10px] text-slate-400">
+                                        · {Math.round(l.durationSec / 60)} min
+                                      </span>
+                                    ) : null}
+                                    {l.isPreview ? (
+                                      <Badge color="amber">Preview</Badge>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                {done ? (
+                                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                                ) : locked ? (
+                                  <Lock className="h-4 w-4 text-slate-400" />
+                                ) : (
+                                  <Icon className="h-4 w-4 text-brand" />
+                                )}
+                              </button>
+                            );
+                          })}
+                          {g.items.length === 0 ? (
+                            <p className="py-3 text-sm text-slate-400">
+                              No lessons in this module yet.
+                            </p>
                           ) : null}
                         </div>
-                      </div>
-
-                      {done ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                      ) : locked ? (
-                        <Lock className="h-4 w-4 text-slate-400" />
-                      ) : (
-                        <Icon className="h-4 w-4 text-brand" />
-                      )}
-                    </button>
+                      ) : null}
+                    </Card>
                   );
                 })}
                 {lessons.length === 0 ? (
-                  <p className="py-3 text-sm text-slate-400">
-                    No lessons added yet.
-                  </p>
+                  <Card>
+                    <p className="py-1 text-sm text-slate-400">
+                      No lessons added yet.
+                    </p>
+                  </Card>
                 ) : null}
               </div>
-            ) : null}
-          </Card>
+            );
+          })()}
 
           {/* Sticky continue */}
           {enrolled && lessons.length ? (
@@ -584,6 +678,270 @@ export default function CourseDetailPage() {
 }
 
 // ============== Lesson player ==============
+// Renders admin-authored rich text (HTML). Falls back to plain text when the
+// value contains no markup, so the learner never sees raw tags / code.
+function HtmlContent({
+  html,
+  className,
+}: {
+  html?: string | null;
+  className?: string;
+}) {
+  const value = html || "";
+  if (!value.trim()) return null;
+  const isHtml = /<\/?[a-z][\s\S]*>/i.test(value);
+  if (!isHtml) {
+    return (
+      <p
+        className={clsx(
+          "whitespace-pre-wrap text-sm leading-relaxed text-slate-700",
+          className,
+        )}
+      >
+        {value}
+      </p>
+    );
+  }
+  const dangerous = { __html: value };
+  return (
+    <div
+      className={clsx("rich-content text-sm text-slate-700", className)}
+      dangerouslySetInnerHTML={dangerous}
+    />
+  );
+}
+
+// Full assignment experience for the web player: task details, reference
+// attachments, submission status and an answer/upload form -- mirrors the app.
+function AssignmentView({ assignment }: { assignment: AssignmentT }) {
+  const mySub = assignment.mySubmission || null;
+  const [subTab, setSubTab] = useState<"details" | "attachments">("details");
+  const [editing, setEditing] = useState(!mySub || mySub.status === "REJECTED");
+  const [answer, setAnswer] = useState(mySub?.answerText || "");
+  const [files, setFiles] = useState<SubFileT[]>(mySub?.attachments || []);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [justSubmitted, setJustSubmitted] = useState(false);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+
+  const refFiles = assignment.attachments || [];
+  const status = justSubmitted ? "UNDER_REVIEW" : mySub?.status;
+
+  async function onPick(list: FileList | null) {
+    if (!list || !list.length) return;
+    setUploading(true);
+    setErr(null);
+    try {
+      for (const file of Array.from(list)) {
+        if (file.size > 50 * 1024 * 1024) {
+          setErr(file.name + " is over the 50 MB limit.");
+          continue;
+        }
+        const up = await uploadFile(file);
+        setFiles((prev) => [
+          ...prev,
+          { key: up.key, name: file.name, size: file.size },
+        ]);
+      }
+    } catch {
+      setErr("Could not upload one of the files.");
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
+  async function submit() {
+    if (!answer.trim() && files.length === 0) {
+      setErr("Please write an answer or attach a file first.");
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await api("/courses/assignments/" + assignment.id + "/submit", {
+        method: "POST",
+        body: {
+          answerText: answer.trim() || null,
+          attachments: JSON.stringify(files),
+        },
+      });
+      setEditing(false);
+      setJustSubmitted(true);
+    } catch (e: any) {
+      setErr(e?.message || "Submit failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex gap-6 border-b border-slate-200">
+        <button
+          onClick={() => setSubTab("details")}
+          className={clsx(
+            "-mb-px border-b-2 pb-2 text-sm font-semibold transition",
+            subTab === "details"
+              ? "border-brand text-brand"
+              : "border-transparent text-slate-500 hover:text-slate-800",
+          )}
+        >
+          Details
+        </button>
+        <button
+          onClick={() => setSubTab("attachments")}
+          className={clsx(
+            "-mb-px border-b-2 pb-2 text-sm font-semibold transition",
+            subTab === "attachments"
+              ? "border-brand text-brand"
+              : "border-transparent text-slate-500 hover:text-slate-800",
+          )}
+        >
+          Attachments
+          {refFiles.length ? (
+            <span className="ml-1 text-xs text-slate-400">
+              ({refFiles.length})
+            </span>
+          ) : null}
+        </button>
+      </div>
+
+      <div className="mt-4">
+        {subTab === "attachments" ? (
+          refFiles.length ? (
+            <div className="space-y-2">
+              {refFiles.map((a, i) => (
+                <AttachmentRow key={i} name={a.name} fileKey={a.key} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">
+              No attachments for this task.
+            </p>
+          )
+        ) : (
+          <HtmlContent
+            html={
+              assignment.description ||
+              "The instructor has not added task details yet."
+            }
+          />
+        )}
+      </div>
+
+      {status === "APPROVED" ? (
+        <div className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">
+          <p className="font-semibold">Assignment approved</p>
+          {typeof mySub?.grade === "number" ? (
+            <p>Grade: {mySub.grade}</p>
+          ) : null}
+          {mySub?.feedback ? <p className="mt-1">{mySub.feedback}</p> : null}
+        </div>
+      ) : null}
+
+      {status === "UNDER_REVIEW" && !editing ? (
+        <div className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
+          Your submission is under review by the instructor.
+        </div>
+      ) : null}
+
+      {status === "REJECTED" && !editing ? (
+        <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          <p className="font-semibold">Changes requested</p>
+          {mySub?.feedback ? <p className="mt-1">{mySub.feedback}</p> : null}
+        </div>
+      ) : null}
+
+      {editing ? (
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+          <p className="text-sm font-semibold text-slate-900">Your answer</p>
+          <textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            rows={5}
+            placeholder="Write your response here..."
+            className="w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-800 outline-none focus:border-brand"
+          />
+          <div>
+            <p className="mb-1 text-sm font-semibold text-slate-900">
+              Attachments
+            </p>
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => onPick(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={uploading}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" />
+              {uploading ? "Uploading..." : "Click to upload"}
+            </button>
+            {files.length ? (
+              <div className="mt-2 space-y-2">
+                {files.map((f, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    <span className="truncate text-slate-700">{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFiles((prev) => prev.filter((x) => x.key !== f.key))
+                      }
+                      className="ml-3 shrink-0 text-slate-400 hover:text-red-500"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {err ? <ErrorText message={err} /> : null}
+          <Button onClick={submit} disabled={submitting || uploading}>
+            <Send className="h-4 w-4" />
+            {submitting ? "Submitting..." : "Submit assignment"}
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+          {mySub?.answerText ? (
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                Your answer
+              </p>
+              <p className="whitespace-pre-wrap text-sm text-slate-700">
+                {mySub.answerText}
+              </p>
+            </div>
+          ) : null}
+          {mySub?.attachments?.length ? (
+            <div className="space-y-2">
+              {mySub.attachments.map((a, i) => (
+                <AttachmentRow key={i} name={a.name} fileKey={a.key} />
+              ))}
+            </div>
+          ) : null}
+          {status !== "APPROVED" ? (
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              Resubmit
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function LessonPlayer({
   lesson,
   watermark,
@@ -695,17 +1053,20 @@ function LessonPlayer({
       {/* Media */}
       {lesson.type === "TEXT" ? (
         <Card>
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-            {lesson.contentKey || lesson.notes || "No content."}
-          </p>
+          <HtmlContent
+            html={lesson.contentKey || lesson.notes || "No content."}
+          />
         </Card>
       ) : lesson.type === "ASSIGNMENT" ? (
-        <Card>
-          <p className="text-sm text-slate-600">
-            This is an assignment lesson. Submit your work from the course
-            tools.
-          </p>
-        </Card>
+        lesson.assignment ? (
+          <AssignmentView assignment={lesson.assignment} />
+        ) : (
+          <Card>
+            <p className="text-sm text-slate-600">
+              This assignment has no details yet.
+            </p>
+          </Card>
+        )
       ) : playLoading ? (
         <div className="flex aspect-video w-full items-center justify-center rounded-xl bg-black/90 text-white/70">
           <Loader2 className="h-6 w-6 animate-spin" />

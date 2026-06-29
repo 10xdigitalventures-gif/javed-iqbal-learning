@@ -18,6 +18,7 @@ import {
   useRoute,
 } from "@react-navigation/native";
 import { api } from "../api";
+import HtmlContent from "../HtmlContent";
 import { Button, Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
 import { trackEvent } from "../activity";
@@ -456,9 +457,13 @@ export default function LessonDetailScreen() {
 
         {isText && (
           <View>
-            <Text style={s.textContent}>
-              {lesson.contentKey || "Lesson content will appear here once uploaded."}
-            </Text>
+            <HtmlContent
+              html={
+                lesson.contentKey ||
+                "Lesson content will appear here once uploaded."
+              }
+              textStyle={s.textContent}
+            />
           </View>
         )}
 
