@@ -11,6 +11,7 @@ export type User = {
   expertise?: string;
   title?: string;
   isActive?: boolean;
+  maxDevices?: number;
 };
 
 export type PackageChannel = "TEXT" | "AUDIO" | "VIDEO" | "COMBINED";

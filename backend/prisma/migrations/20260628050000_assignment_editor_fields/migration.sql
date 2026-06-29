@@ -1,0 +1,3 @@
+ALTER TABLE "Assignment" ADD COLUMN IF NOT EXISTS "thumbnailUrl" TEXT;
+ALTER TABLE "Assignment" ADD COLUMN IF NOT EXISTS "graded" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Assignment" ADD COLUMN IF NOT EXISTS "completionMessage" TEXT;

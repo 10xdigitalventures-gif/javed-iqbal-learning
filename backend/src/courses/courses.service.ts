@@ -148,7 +148,14 @@ export class CoursesService {
       enrollment = await this.prisma.enrollment.findUnique({
         where: { userId_courseId: { userId, courseId: course.id } },
       });
-      hasAccess = !!enrollment;
+      // Access is valid only if the enrollment exists, is not manually revoked,
+      // and its access window has not expired (null accessUntil = lifetime).
+      const nowMs = Date.now();
+      const notRevoked = !enrollment?.revokedAt;
+      const notExpired =
+        !enrollment?.accessUntil ||
+        new Date(enrollment.accessUntil).getTime() > nowMs;
+      hasAccess = !!enrollment && notRevoked && notExpired;
       const completions = await this.prisma.lessonCompletion.findMany({
         where: { userId, courseId: course.id },
       });
@@ -324,8 +331,12 @@ export class CoursesService {
         }
       }
 
-      const locked =
-        lockedByAccess || moduleLocked || seqLocked || lessonTimeLocked;
+      // OPEN policy: once purchased, everything is unlocked (only the
+      // not-enrolled access lock still applies).
+      const openPolicy = (course as any).unlockPolicy === "OPEN";
+      const locked = openPolicy
+        ? lockedByAccess
+        : lockedByAccess || moduleLocked || seqLocked || lessonTimeLocked;
 
       // Reason + the soonest moment the lesson becomes available (for a
       // client-side countdown). Access/sequence locks have no countdown.
@@ -387,16 +398,18 @@ export class CoursesService {
     });
 
     // Module summaries for grouped rendering + lock badges on the client.
+    const openPolicyTop = (course as any).unlockPolicy === "OPEN";
     const modules = (course.modules as any[]).map((m) => {
       const meta = moduleMetaById.get(m.id)!;
+      const mLocked = openPolicyTop ? false : meta.locked;
       return {
         id: m.id,
         title: m.title,
         index: m.index,
         lockMode: m.lockMode,
         unlockDelayHours: m.unlockDelayHours,
-        locked: meta.locked,
-        lockReason: meta.locked
+        locked: mLocked,
+        lockReason: mLocked
           ? meta.lockedByPrev
             ? "PREV_MODULE"
             : "MODULE_TIME"
@@ -426,12 +439,39 @@ export class CoursesService {
       });
     }
 
+    // Access window summary for the client (drives the "X days left" banner and
+    // the offline-wipe trigger when access has expired/been revoked).
+    const accessUntilIso = enrollment?.accessUntil
+      ? new Date(enrollment.accessUntil).toISOString()
+      : null;
+    const accessRevoked = !!enrollment?.revokedAt;
+    const accessExpired =
+      !!enrollment &&
+      (accessRevoked ||
+        (!!enrollment.accessUntil &&
+          new Date(enrollment.accessUntil).getTime() <= Date.now()));
+    const accessDaysLeft = enrollment?.accessUntil
+      ? Math.max(
+          0,
+          Math.ceil(
+            (new Date(enrollment.accessUntil).getTime() - Date.now()) /
+              (24 * 3600 * 1000),
+          ),
+        )
+      : null;
+
     return {
       ...course,
       lessons,
       modules,
       enrollment,
       hasAccess,
+      accessUntil: accessUntilIso,
+      accessExpired,
+      accessRevoked,
+      accessDaysLeft,
+      unlockPolicy: (course as any).unlockPolicy,
+      offlineValidityDays: (course as any).offlineValidityDays,
       reviewSummary,
       myReview,
     };
@@ -478,6 +518,8 @@ export class CoursesService {
         index: dto.index,
         lockMode: dto.lockMode ?? "SINGLE",
         unlockDelayHours: dto.unlockDelayHours ?? 0,
+        isPublished: dto.isPublished ?? true,
+        parentId: dto.parentId ?? null,
       },
     });
   }
@@ -489,6 +531,8 @@ export class CoursesService {
     if (dto.lockMode !== undefined) data.lockMode = dto.lockMode;
     if (dto.unlockDelayHours !== undefined)
       data.unlockDelayHours = dto.unlockDelayHours;
+    if (dto.isPublished !== undefined) data.isPublished = dto.isPublished;
+    if (dto.parentId !== undefined) data.parentId = dto.parentId || null;
     return this.prisma.courseModule.update({ where: { id }, data });
   }
 
@@ -520,6 +564,7 @@ export class CoursesService {
         source: dto.source ?? "UPLOAD",
         durationSec: dto.durationSec ?? null,
         isPreview: dto.isPreview ?? false,
+        isPublished: dto.isPublished ?? true,
       },
     });
   }
@@ -542,6 +587,7 @@ export class CoursesService {
     if (dto.source !== undefined) data.source = dto.source;
     if (dto.durationSec !== undefined) data.durationSec = dto.durationSec;
     if (dto.isPreview !== undefined) data.isPreview = dto.isPreview;
+    if (dto.isPublished !== undefined) data.isPublished = dto.isPublished;
     return this.prisma.lesson.update({ where: { id }, data });
   }
 
@@ -556,10 +602,82 @@ export class CoursesService {
       where: { id: courseId },
     });
     if (!course) throw new NotFoundException("Course not found");
+    const days = (course as any).accessDurationDays as number | null;
+    const accessUntil =
+      days && days > 0 ? new Date(Date.now() + days * 24 * 3600 * 1000) : null;
     return this.prisma.enrollment.upsert({
       where: { userId_courseId: { userId, courseId } },
-      create: { userId, courseId },
-      update: {},
+      create: { userId, courseId, accessUntil, revokedAt: null },
+      // Re-enrolling (e.g. renewal) clears any prior revoke and resets window.
+      update: { accessUntil, revokedAt: null },
+    });
+  }
+
+  // ---- Admin: per-user access management ----
+  // Grant or extend access for a user. `days` overrides the course default;
+  // pass days=0 / null for lifetime access. Clears any prior revoke.
+  async grantAccess(userId: string, courseId: string, days?: number | null) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+    });
+    if (!course) throw new NotFoundException("Course not found");
+    const effDays =
+      days === undefined ? (course as any).accessDurationDays : days;
+    const accessUntil =
+      effDays && effDays > 0
+        ? new Date(Date.now() + effDays * 24 * 3600 * 1000)
+        : null;
+    return this.prisma.enrollment.upsert({
+      where: { userId_courseId: { userId, courseId } },
+      create: { userId, courseId, accessUntil, revokedAt: null },
+      update: { accessUntil, revokedAt: null },
+    });
+  }
+
+  // Revoke access immediately. The mobile app will wipe downloaded videos for
+  // this course on its next load.
+  async revokeAccess(userId: string, courseId: string) {
+    const existing = await this.prisma.enrollment.findUnique({
+      where: { userId_courseId: { userId, courseId } },
+    });
+    if (!existing) throw new NotFoundException("Enrollment not found");
+    return this.prisma.enrollment.update({
+      where: { userId_courseId: { userId, courseId } },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  // List all learners enrolled in a course with their access status (admin).
+  async listEnrollments(courseId: string) {
+    const rows = await this.prisma.enrollment.findMany({
+      where: { courseId },
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { startedAt: "desc" },
+    });
+    const now = Date.now();
+    return rows.map((e) => {
+      const expired =
+        !!e.revokedAt ||
+        (!!e.accessUntil && new Date(e.accessUntil).getTime() <= now);
+      const daysLeft = e.accessUntil
+        ? Math.max(
+            0,
+            Math.ceil(
+              (new Date(e.accessUntil).getTime() - now) / (24 * 3600 * 1000),
+            ),
+          )
+        : null;
+      return {
+        id: e.id,
+        userId: e.userId,
+        user: e.user,
+        startedAt: e.startedAt,
+        percentComplete: e.percentComplete,
+        accessUntil: e.accessUntil,
+        revokedAt: e.revokedAt,
+        active: !expired,
+        daysLeft,
+      };
     });
   }
 
@@ -1053,6 +1171,9 @@ export class CoursesService {
         description: dto.description ?? null,
         lessonId: dto.lessonId ?? null,
         attachments: dto.attachments ?? null,
+        thumbnailUrl: dto.thumbnailUrl ?? null,
+        graded: dto.graded ?? true,
+        completionMessage: dto.completionMessage ?? null,
       },
     });
   }
@@ -1063,6 +1184,11 @@ export class CoursesService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.lessonId !== undefined) data.lessonId = dto.lessonId || null;
     if (dto.attachments !== undefined) data.attachments = dto.attachments;
+    if (dto.thumbnailUrl !== undefined)
+      data.thumbnailUrl = dto.thumbnailUrl || null;
+    if (dto.graded !== undefined) data.graded = dto.graded;
+    if (dto.completionMessage !== undefined)
+      data.completionMessage = dto.completionMessage || null;
     return this.prisma.assignment.update({ where: { id }, data });
   }
 
@@ -1182,5 +1308,245 @@ export class CoursesService {
       include: { course: true },
       orderBy: { issuedAt: "desc" },
     });
+  }
+
+  // =========================================================================
+  // Offers (course access pricing tiers)
+  // =========================================================================
+  async listOffers(courseId: string) {
+    return this.prisma.courseOffer.findMany({
+      where: { courseId },
+      orderBy: [{ index: "asc" }, { createdAt: "asc" }],
+    });
+  }
+
+  async createOffer(dto: CreateOfferDto) {
+    return this.prisma.courseOffer.create({
+      data: {
+        courseId: dto.courseId,
+        name: dto.name,
+        description: dto.description ?? null,
+        price: dto.price ?? 0,
+        currency: dto.currency ?? "PKR",
+        accessDurationDays: dto.accessDurationDays ?? null,
+        isActive: dto.isActive ?? true,
+        index: dto.index ?? 0,
+      },
+    });
+  }
+
+  async updateOffer(id: string, dto: UpdateOfferDto) {
+    const data: any = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.description !== undefined)
+      data.description = dto.description || null;
+    if (dto.price !== undefined) data.price = dto.price;
+    if (dto.currency !== undefined) data.currency = dto.currency;
+    if (dto.accessDurationDays !== undefined)
+      data.accessDurationDays = dto.accessDurationDays;
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.index !== undefined) data.index = dto.index;
+    return this.prisma.courseOffer.update({ where: { id }, data });
+  }
+
+  async removeOffer(id: string) {
+    await this.prisma.courseOffer.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // Grant a user access to a course THROUGH a specific offer (admin direct
+  // payment collection). Uses the offer's access duration (null = lifetime).
+  async grantOfferAccess(offerId: string, userId: string) {
+    const offer = await this.prisma.courseOffer.findUnique({
+      where: { id: offerId },
+    });
+    if (!offer) throw new NotFoundException("Offer not found");
+    return this.grantAccess(userId, offer.courseId, offer.accessDurationDays);
+  }
+
+  // =========================================================================
+  // Global coupons
+  // =========================================================================
+  async listCoupons() {
+    return this.prisma.coupon.findMany({ orderBy: { createdAt: "desc" } });
+  }
+
+  async createCoupon(dto: CreateCouponDto) {
+    return this.prisma.coupon.create({
+      data: {
+        code: dto.code.trim().toUpperCase(),
+        discountType: dto.discountType ?? "PERCENT",
+        amount: dto.amount ?? 0,
+        isActive: dto.isActive ?? true,
+        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+        maxRedemptions: dto.maxRedemptions ?? null,
+      },
+    });
+  }
+
+  async updateCoupon(id: string, dto: UpdateCouponDto) {
+    const data: any = {};
+    if (dto.code !== undefined) data.code = dto.code.trim().toUpperCase();
+    if (dto.discountType !== undefined) data.discountType = dto.discountType;
+    if (dto.amount !== undefined) data.amount = dto.amount;
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.expiresAt !== undefined)
+      data.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
+    if (dto.maxRedemptions !== undefined)
+      data.maxRedemptions = dto.maxRedemptions;
+    return this.prisma.coupon.update({ where: { id }, data });
+  }
+
+  async removeCoupon(id: string) {
+    await this.prisma.coupon.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // Validate a coupon against an amount and return the computed discount. Used
+  // at checkout. Globally applicable (not tied to any course/product).
+  async validateCoupon(code: string, amount: number) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code: (code || "").trim().toUpperCase() },
+    });
+    if (!coupon || !coupon.isActive)
+      throw new BadRequestException("Invalid coupon code");
+    if (coupon.expiresAt && new Date(coupon.expiresAt).getTime() < Date.now())
+      throw new BadRequestException("This coupon has expired");
+    if (
+      coupon.maxRedemptions != null &&
+      coupon.timesRedeemed >= coupon.maxRedemptions
+    )
+      throw new BadRequestException("This coupon has reached its limit");
+    const discount =
+      coupon.discountType === "FIXED"
+        ? Math.min(coupon.amount, amount)
+        : Math.round(((amount * coupon.amount) / 100) * 100) / 100;
+    const finalAmount = Math.max(
+      0,
+      Math.round((amount - discount) * 100) / 100,
+    );
+    return {
+      valid: true,
+      code: coupon.code,
+      discountType: coupon.discountType,
+      amount: coupon.amount,
+      discount,
+      finalAmount,
+    };
+  }
+
+  // =========================================================================
+  // Course-level comments
+  // =========================================================================
+  async listComments(courseId: string) {
+    return this.prisma.courseComment.findMany({
+      where: { courseId },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, avatarUrl: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async createComment(courseId: string, userId: string, dto: CreateCommentDto) {
+    return this.prisma.courseComment.create({
+      data: {
+        courseId,
+        userId,
+        body: dto.body,
+        lessonId: dto.lessonId ?? null,
+        parentId: dto.parentId ?? null,
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+  }
+
+  async removeComment(id: string) {
+    await this.prisma.courseComment.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // =========================================================================
+  // Course badges (welcome / completion)
+  // =========================================================================
+  async listBadges(courseId: string) {
+    return this.prisma.courseBadge.findMany({
+      where: { courseId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async createBadge(dto: CreateBadgeDto) {
+    return this.prisma.courseBadge.create({
+      data: {
+        courseId: dto.courseId,
+        type: dto.type ?? "WELCOME",
+        name: dto.name,
+        imageUrl: dto.imageUrl ?? null,
+        message: dto.message ?? null,
+      },
+    });
+  }
+
+  async updateBadge(id: string, dto: UpdateBadgeDto) {
+    const data: any = {};
+    if (dto.type !== undefined) data.type = dto.type;
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.imageUrl !== undefined) data.imageUrl = dto.imageUrl || null;
+    if (dto.message !== undefined) data.message = dto.message || null;
+    return this.prisma.courseBadge.update({ where: { id }, data });
+  }
+
+  async removeBadge(id: string) {
+    await this.prisma.courseBadge.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // =========================================================================
+  // Live sessions
+  // =========================================================================
+  async listLiveSessions(courseId: string) {
+    return this.prisma.liveSession.findMany({
+      where: { courseId },
+      orderBy: { scheduledAt: "asc" },
+    });
+  }
+
+  async createLiveSession(dto: CreateLiveSessionDto) {
+    return this.prisma.liveSession.create({
+      data: {
+        courseId: dto.courseId,
+        title: dto.title,
+        description: dto.description ?? null,
+        scheduledAt: new Date(dto.scheduledAt),
+        durationMin: dto.durationMin ?? 60,
+        joinUrl: dto.joinUrl ?? null,
+        status: dto.status ?? "SCHEDULED",
+      },
+    });
+  }
+
+  async updateLiveSession(id: string, dto: UpdateLiveSessionDto) {
+    const data: any = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.description !== undefined)
+      data.description = dto.description || null;
+    if (dto.scheduledAt !== undefined)
+      data.scheduledAt = new Date(dto.scheduledAt);
+    if (dto.durationMin !== undefined) data.durationMin = dto.durationMin;
+    if (dto.joinUrl !== undefined) data.joinUrl = dto.joinUrl || null;
+    if (dto.status !== undefined) data.status = dto.status;
+    return this.prisma.liveSession.update({ where: { id }, data });
+  }
+
+  async removeLiveSession(id: string) {
+    await this.prisma.liveSession.delete({ where: { id } });
+    return { ok: true };
   }
 }

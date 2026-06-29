@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { api, clearToken, loadToken, setToken } from "./api";
+import {
+  api,
+  clearToken,
+  getDeviceInfo,
+  loadToken,
+  setToken,
+  setOnSignedOut,
+} from "./api";
 import { clearPush, registerForPush } from "./push";
 
 export type User = {
@@ -43,12 +50,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     bootstrap();
+    // When the server signs this device out (concurrent-device limit), force
+    // a local logout so the user returns to the login screen.
+    setOnSignedOut(() => {
+      clearToken();
+      setUser(null);
+    });
+    return () => setOnSignedOut(null);
   }, []);
 
   async function login(email: string, password: string) {
+    const device = await getDeviceInfo();
     const res = await api<{ token: string; user: User }>("/auth/login", {
       method: "POST",
-      body: { email, password },
+      body: { email, password, ...device },
     });
     await setToken(res.token);
     setUser(res.user);
@@ -57,9 +72,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function register(body: any) {
+    const device = await getDeviceInfo();
     const res = await api<{ token: string; user: User }>("/auth/register", {
       method: "POST",
-      body,
+      body: { ...body, ...device },
     });
     await setToken(res.token);
     setUser(res.user);

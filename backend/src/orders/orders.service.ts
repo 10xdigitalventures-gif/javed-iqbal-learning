@@ -115,8 +115,43 @@ export class OrdersService {
       throw new BadRequestException("Unsupported order kind");
     }
 
+    // ---- Global coupon (optional) ----
+    let discount = 0;
+    let couponCode: string | null = null;
+    if (dto.couponCode) {
+      const coupon = await this.prisma.coupon.findUnique({
+        where: { code: dto.couponCode.trim().toUpperCase() },
+      });
+      const now = Date.now();
+      const usable =
+        coupon &&
+        coupon.isActive &&
+        (!coupon.expiresAt || new Date(coupon.expiresAt).getTime() >= now) &&
+        (coupon.maxRedemptions == null ||
+          coupon.timesRedeemed < coupon.maxRedemptions);
+      if (!usable) throw new BadRequestException("Invalid or expired coupon");
+      discount =
+        coupon.discountType === "FIXED"
+          ? Math.min(coupon.amount, amount)
+          : Math.round(((amount * coupon.amount) / 100) * 100) / 100;
+      discount = Math.max(0, Math.min(discount, amount));
+      amount = Math.max(0, Math.round((amount - discount) * 100) / 100);
+      couponCode = coupon.code;
+      await this.prisma.coupon.update({
+        where: { id: coupon.id },
+        data: { timesRedeemed: { increment: 1 } },
+      });
+    }
+
     const order = await this.prisma.order.create({
-      data: { ...data, amount, currency },
+      data: {
+        ...data,
+        amount,
+        currency,
+        discount,
+        couponCode,
+        offerId: dto.offerId ?? null,
+      },
     });
 
     const payment = await this.prisma.payment.create({
@@ -210,12 +245,28 @@ export class OrdersService {
     ) {
       await this.grantSubscription(order.userId, order.planId);
     } else if (order.kind === LearningProductKind.COURSE && order.courseId) {
+      // Compute the access window from the course default duration (if any).
+      const courseRow = await this.prisma.course.findUnique({
+        where: { id: order.courseId },
+        select: { accessDurationDays: true },
+      });
+      const days = courseRow?.accessDurationDays ?? null;
+      const accessUntil =
+        days && days > 0
+          ? new Date(Date.now() + days * 24 * 3600 * 1000)
+          : null;
       await this.prisma.enrollment.upsert({
         where: {
           userId_courseId: { userId: order.userId, courseId: order.courseId },
         },
-        create: { userId: order.userId, courseId: order.courseId },
-        update: {},
+        create: {
+          userId: order.userId,
+          courseId: order.courseId,
+          accessUntil,
+          revokedAt: null,
+        },
+        // Renewal/re-purchase resets the window and clears any revoke.
+        update: { accessUntil, revokedAt: null },
       });
     } else if (
       order.kind === LearningProductKind.COMMUNITY &&

@@ -2,8 +2,10 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Min,
   MinLength,
 } from "class-validator";
 import { Role } from "@prisma/client";
@@ -72,4 +74,10 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // Concurrent device limit (how many devices may stay logged in at once).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxDevices?: number;
 }

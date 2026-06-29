@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   Text,
   TextInput,
@@ -21,11 +22,20 @@ import { Button, Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
 import { trackEvent } from "../activity";
 import { useContentProtection } from "../protect";
-import { downloadLesson, localLessonUri, removeLesson } from "../offlineCourse";
+import {
+  downloadLesson,
+  downloadLessonSecure,
+  validateAndGetLocalUri,
+  getDrmConfig,
+  getOfflineStatus,
+  enforceCourseAccess,
+  isLessonDownloaded,
+  removeLesson,
+  DrmConfig,
+  OfflineStatus,
+} from "../offlineCourseSecure";
 import AssignmentLesson from "./AssignmentLesson";
 
-// expo-av needs an object source. Build it through a helper so we never emit a
-// double-brace JSX literal (which the bundler can mangle).
 const vsrc = (uri: string) => ({ uri });
 
 export default function LessonDetailScreen() {
@@ -34,23 +44,26 @@ export default function LessonDetailScreen() {
   const lessonId: string = route.params?.lessonId;
   const courseId: string = route.params?.courseId;
 
-  // Deter screen recording while a protected lesson is on screen. (Screenshots
-  // are not a concern for courses, but the same native flag also blocks them.)
+  // Phase 1: Deter screen capture on all platforms
   useContentProtection();
 
   const [loading, setLoading] = useState(true);
   const [course, setCourse] = useState<any>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
-
-  // Playback + offline state for the current lesson.
   const [playUri, setPlayUri] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
   const [dlBusy, setDlBusy] = useState(false);
+  const [dlProgress, setDlProgress] = useState(0); // 0-100
   const [marked, setMarked] = useState(false);
-  // Throttle: timestamp of the last watch-progress report.
+  // Phase 3: DRM config for online streaming
+  const [drmConfig, setDrmConfig] = useState<DrmConfig | null>(null);
+  // Phase 2: token validity indicator
+  const [tokenWarning, setTokenWarning] = useState(false);
+  // YouTube-style offline expiry countdown for the player banner
+  const [offlineStatus, setOfflineStatus] = useState<OfflineStatus | null>(null);
+
   const lastReportRef = useRef(0);
-  // expo-av player handle + one-shot resume flag for seek-to-last-position.
   const videoRef = useRef<Video | null>(null);
   const didSeekRef = useRef(false);
 
@@ -58,8 +71,15 @@ export default function LessonDetailScreen() {
     useCallback(() => {
       setLoading(true);
       api("/courses/" + courseId)
-        .then((d: any) => {
+        .then(async (d: any) => {
           setCourse(d);
+          // Wipe any offline copies if access has expired / been revoked.
+          if (d?.accessExpired || d?.hasAccess === false) {
+            await enforceCourseAccess(courseId, {
+              accessExpired: d?.accessExpired,
+              hasAccess: d?.hasAccess,
+            }).catch(() => {});
+          }
           const idx = d.lessons?.findIndex((l: any) => l.id === lessonId) ?? 0;
           setCurrentIdx(idx >= 0 ? idx : 0);
           trackEvent("lesson_opened", { courseId, meta: { lessonIndex: idx } });
@@ -70,13 +90,13 @@ export default function LessonDetailScreen() {
 
   const lesson = course?.lessons?.[currentIdx];
 
-  // Resolve the playback source whenever the current lesson changes:
-  //   1) an offline copy in the app sandbox (works with no internet),
-  //   2) an external streaming link (source = LINK), or
-  //   3) a fresh signed stream URL for uploaded content.
+  // Resolve playback source with Phase 2 token validation + Phase 3 DRM
   useEffect(() => {
     let active = true;
     setMarked(false);
+    setDrmConfig(null);
+    setTokenWarning(false);
+    setOfflineStatus(null);
     lastReportRef.current = 0;
     didSeekRef.current = false;
     if (!lesson || lesson.type !== "VIDEO") {
@@ -88,47 +108,50 @@ export default function LessonDetailScreen() {
       setResolving(true);
       setPlayUri(null);
       try {
-        const local = await localLessonUri(lesson.id);
+        // Phase 2: Check offline copy with token validation
+        const localResult = await validateAndGetLocalUri(lesson.id);
         if (!active) return;
-        setDownloaded(!!local);
-        if (local) {
-          setPlayUri(local);
+        if (localResult) {
+          setDownloaded(true);
+          if (!localResult.tokenValid) setTokenWarning(true);
+          setOfflineStatus(await getOfflineStatus(lesson.id).catch(() => null));
+          setPlayUri(localResult.uri);
           return;
         }
+        setDownloaded(false);
+        setOfflineStatus(null);
+
+        // External streaming link (no DRM needed)
         if (lesson.source === "LINK" && lesson.videoUrl) {
           setPlayUri(lesson.videoUrl);
           return;
         }
+
+        // Phase 3: Fetch DRM config for protected online streaming
         if (lesson.contentKey) {
+          const drm = await getDrmConfig(lesson.id).catch(() => null);
+          if (active && drm) setDrmConfig(drm);
+
+          // Also get signed URL for expo-av (DRM is layered on top)
           const signed: any = await api(
             "/media/sign?key=" + encodeURIComponent(lesson.contentKey),
           );
           if (active && signed?.url) setPlayUri(signed.url);
         }
       } catch {
-        // leave the placeholder visible on failure
+        // leave placeholder on failure
       } finally {
         if (active) setResolving(false);
       }
     })();
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [lesson?.id]);
 
   if (loading) return <Loading />;
   if (!course)
-    return (
-      <View style={s.center}>
-        <Text style={s.muted}>Lesson not found.</Text>
-      </View>
-    );
+    return <View style={s.center}><Text style={s.muted}>Lesson not found.</Text></View>;
   if (!lesson)
-    return (
-      <View style={s.center}>
-        <Text style={s.muted}>No lessons available.</Text>
-      </View>
-    );
+    return <View style={s.center}><Text style={s.muted}>No lessons available.</Text></View>;
 
   function next() {
     markComplete();
@@ -136,41 +159,78 @@ export default function LessonDetailScreen() {
       const nextLesson = course.lessons[currentIdx + 1];
       nav.setParams({ lessonId: nextLesson.id, title: nextLesson.title });
       setCurrentIdx(currentIdx + 1);
-      trackEvent("lesson_completed", {
-        courseId,
-        meta: { lessonIndex: currentIdx },
-      });
+      trackEvent("lesson_completed", { courseId, meta: { lessonIndex: currentIdx } });
     } else {
       Alert.alert("Course Complete!", "You have finished all lessons.");
     }
   }
 
+  // Phase 2: Secure download with token
   async function download() {
     if (!lesson.contentKey) return;
     setDlBusy(true);
+    setDlProgress(5);
     try {
+      // Get signed streaming URL
       const signed: any = await api(
         "/media/sign?key=" + encodeURIComponent(lesson.contentKey),
       );
       if (!signed?.url) throw new Error("Could not get the download link.");
-      await downloadLesson({
-        lessonId: lesson.id,
-        courseId,
-        courseTitle: course.title,
-        title: lesson.title,
-        signedUrl: signed.url,
-      });
+      setDlProgress(15);
+
+      // Phase 2: Get download token + AES key from server
+      let token = "", aesKeyVal = "", tokenExpiresAt = 0;
+      let accessUntilVal: number | null = null;
+      let offlineValidityDaysVal: number | undefined = undefined;
+      try {
+        const tkn: any = await api("/media/download-token", {
+          method: "POST",
+          body: { lessonId: lesson.id },
+        });
+        token = tkn?.token ?? "";
+        aesKeyVal = tkn?.aesKey ?? "";
+        tokenExpiresAt = tkn?.expiresAt ?? 0;
+        accessUntilVal = tkn?.accessUntil ?? null;
+        offlineValidityDaysVal = tkn?.offlineValidityDays;
+      } catch {
+        // Token fetch failed - fall back to Phase 1 download
+      }
+      setDlProgress(25);
+
+      if (token) {
+        await downloadLessonSecure({
+          lessonId: lesson.id,
+          courseId,
+          courseTitle: course.title,
+          title: lesson.title,
+          signedUrl: signed.url,
+          token,
+          aesKey: aesKeyVal,
+          tokenExpiresAt,
+          accessUntil: accessUntilVal,
+          offlineValidityDays: offlineValidityDaysVal,
+        });
+      } else {
+        // Phase 1 fallback
+        await downloadLesson({
+          lessonId: lesson.id,
+          courseId,
+          courseTitle: course.title,
+          title: lesson.title,
+          signedUrl: signed.url,
+        });
+      }
+      setDlProgress(100);
       setDownloaded(true);
-      const local = await localLessonUri(lesson.id);
-      if (local) setPlayUri(local);
-      Alert.alert(
-        "Downloaded",
-        "This lesson is now saved for offline viewing.",
-      );
+      setOfflineStatus(await getOfflineStatus(lesson.id).catch(() => null));
+      const localResult = await validateAndGetLocalUri(lesson.id);
+      if (localResult) setPlayUri(localResult.uri);
+      Alert.alert("Downloaded", "This lesson is saved securely for offline viewing.");
     } catch (e: any) {
       Alert.alert("Download failed", e?.message || "Could not download.");
     } finally {
       setDlBusy(false);
+      setDlProgress(0);
     }
   }
 
@@ -179,55 +239,35 @@ export default function LessonDetailScreen() {
     try {
       await removeLesson(lesson.id);
       setDownloaded(false);
+      setTokenWarning(false);
       Alert.alert("Removed", "Offline copy deleted from this device.");
     } finally {
       setDlBusy(false);
     }
   }
 
-  // Mark this lesson complete so course progress updates live. The server call
-  // is idempotent, so replays or repeated taps are harmless.
   async function markComplete() {
     if (marked) return;
     try {
-      await api("/courses/lessons/" + lesson.id + "/complete", {
-        method: "POST",
-      });
+      await api("/courses/lessons/" + lesson.id + "/complete", { method: "POST" });
       setMarked(true);
-    } catch {
-      // progress is best-effort; ignore failures
-    }
+    } catch {}
   }
 
-  // Report how much of the video has been watched (0..1) so the course bar
-  // grows gradually. Near the end we just mark the lesson complete.
   async function reportWatch(fraction: number, positionSec?: number) {
-    if (fraction >= 0.95) {
-      markComplete();
-      return;
-    }
+    if (fraction >= 0.95) { markComplete(); return; }
     try {
       await api("/courses/lessons/" + lesson.id + "/progress", {
         method: "POST",
-        body:
-          positionSec != null
-            ? { progress: fraction, positionSec: Math.round(positionSec) }
-            : { progress: fraction },
+        body: positionSec != null
+          ? { progress: fraction, positionSec: Math.round(positionSec) }
+          : { progress: fraction },
       });
-    } catch {
-      // progress is best-effort; ignore failures
-    }
+    } catch {}
   }
 
-  // Re-fetch the course so freshly computed lock/completion + submission state
-  // is reflected after an assignment is submitted.
   async function reloadCourse() {
-    try {
-      const d: any = await api("/courses/" + courseId);
-      setCourse(d);
-    } catch {
-      // best-effort refresh
-    }
+    try { const d: any = await api("/courses/" + courseId); setCourse(d); } catch {}
   }
 
   const isVideo = lesson.type === "VIDEO";
@@ -236,8 +276,6 @@ export default function LessonDetailScreen() {
   const isAssignment = lesson.type === "ASSIGNMENT";
   const isLink = lesson.source === "LINK";
   const canDownload = isVideo && !isLink && !!lesson.contentKey;
-  const prevTitle =
-    currentIdx > 0 ? course.lessons[currentIdx - 1]?.title : undefined;
 
   return (
     <View style={s.wrap}>
@@ -248,11 +286,64 @@ export default function LessonDetailScreen() {
         <Text style={s.headerTitle} numberOfLines={1}>
           #{lesson.index + 1} {lesson.title}
         </Text>
+        {/* Phase 3 DRM badge */}
+        {drmConfig && !downloaded && (
+          <View style={s.drmBadge}>
+            <Ionicons name="shield-checkmark" size={12} color="#7c3aed" />
+            <Text style={s.drmText}>DRM</Text>
+          </View>
+        )}
       </View>
 
       <ScrollView style={s.body} contentContainerStyle={s.bodyContent}>
         {isVideo && (
           <View>
+            {/* Offline expiry status banner (YouTube-style) */}
+            {downloaded && offlineStatus?.needsRevalidation ? (
+              <View style={[s.tokenWarn, s.tokenWarnRed]}>
+                <Ionicons name="cloud-offline" size={14} color="#dc2626" />
+                <Text style={[s.tokenWarnText, s.tokenWarnTextRed]}>
+                  Downloaded video expired. Connect to the internet to refresh it.
+                </Text>
+              </View>
+            ) : downloaded &&
+              offlineStatus?.daysUntilOfflineExpiry != null &&
+              offlineStatus.daysUntilOfflineExpiry <= 7 ? (
+              <View style={s.tokenWarn}>
+                <Ionicons name="time-outline" size={14} color="#d97706" />
+                <Text style={s.tokenWarnText}>
+                  Expires in {offlineStatus.daysUntilOfflineExpiry} day
+                  {offlineStatus.daysUntilOfflineExpiry === 1 ? "" : "s"} —
+                  connect to the internet to keep watching offline.
+                </Text>
+              </View>
+            ) : downloaded && offlineStatus?.daysUntilOfflineExpiry != null ? (
+              <View style={s.tokenOk}>
+                <Ionicons name="cloud-done" size={14} color="#16a34a" />
+                <Text style={s.tokenOkText}>
+                  Saved offline · expires in {offlineStatus.daysUntilOfflineExpiry} days
+                </Text>
+              </View>
+            ) : tokenWarning ? (
+              <View style={s.tokenWarn}>
+                <Ionicons name="warning" size={14} color="#d97706" />
+                <Text style={s.tokenWarnText}>
+                  Offline copy needs a refresh. Connect to the internet.
+                </Text>
+              </View>
+            ) : null}
+            {/* Access window countdown (purchased duration) */}
+            {offlineStatus?.daysUntilAccessExpiry != null &&
+              offlineStatus.daysUntilAccessExpiry <= 14 && (
+                <View style={s.tokenWarn}>
+                  <Ionicons name="key-outline" size={14} color="#d97706" />
+                  <Text style={s.tokenWarnText}>
+                    Your access ends in {offlineStatus.daysUntilAccessExpiry} day
+                    {offlineStatus.daysUntilAccessExpiry === 1 ? "" : "s"}.
+                  </Text>
+                </View>
+              )}
+
             {playUri ? (
               <Video
                 ref={videoRef}
@@ -261,31 +352,21 @@ export default function LessonDetailScreen() {
                 resizeMode={ResizeMode.CONTAIN}
                 style={s.video}
                 onLoad={(st: any) => {
-                  // Resume where the learner left off (once per lesson load).
                   if (didSeekRef.current) return;
                   didSeekRef.current = true;
                   const resumeSec = lesson.resumeSec || 0;
                   const durMs = st?.durationMillis || 0;
-                  if (
-                    resumeSec > 0 &&
-                    videoRef.current &&
-                    (!durMs || resumeSec * 1000 < durMs - 5000)
-                  ) {
-                    videoRef.current
-                      .setPositionAsync(resumeSec * 1000)
-                      .catch(() => {});
+                  if (resumeSec > 0 && videoRef.current &&
+                    (!durMs || resumeSec * 1000 < durMs - 5000)) {
+                    videoRef.current.setPositionAsync(resumeSec * 1000).catch(() => {});
                   }
                 }}
                 onPlaybackStatusUpdate={(st: any) => {
                   if (!st?.isLoaded) return;
-                  if (st.didJustFinish) {
-                    markComplete();
-                    return;
-                  }
+                  if (st.didJustFinish) { markComplete(); return; }
                   if (st.isPlaying && st.durationMillis) {
                     const frac = st.positionMillis / st.durationMillis;
                     const now = Date.now();
-                    // report at most once every 8s of playback
                     if (now - lastReportRef.current > 8000) {
                       lastReportRef.current = now;
                       reportWatch(frac, st.positionMillis / 1000);
@@ -310,17 +391,21 @@ export default function LessonDetailScreen() {
               </View>
             )}
 
-            {canDownload ? (
+            {/* Download progress bar */}
+            {dlBusy && dlProgress > 0 && (
+              <View style={s.progressWrap}>
+                <View style={[s.progressBar, { width: dlProgress + "%" as any }]} />
+                <Text style={s.progressText}>{dlProgress}%</Text>
+              </View>
+            )}
+
+            {canDownload && (
               <View style={s.dlRow}>
                 {downloaded ? (
                   <>
                     <View style={s.dlBadge}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={16}
-                        color="#16a34a"
-                      />
-                      <Text style={s.dlBadgeText}>Saved offline</Text>
+                      <Ionicons name="checkmark-circle" size={16} color="#16a34a" />
+                      <Text style={s.dlBadgeText}>Saved offline (secured)</Text>
                     </View>
                     <TouchableOpacity onPress={removeOffline} disabled={dlBusy}>
                       <Text style={s.dlRemove}>Remove</Text>
@@ -336,31 +421,29 @@ export default function LessonDetailScreen() {
                     {dlBusy ? (
                       <ActivityIndicator color="#fff" size="small" />
                     ) : (
-                      <Ionicons
-                        name="download-outline"
-                        size={16}
-                        color="#fff"
-                      />
+                      <Ionicons name="download-outline" size={16} color="#fff" />
                     )}
                     <Text style={s.dlBtnText}>
-                      {dlBusy ? "Downloading..." : "Download for offline"}
+                      {dlBusy ? "Downloading... " + dlProgress + "%" : "Download for offline"}
                     </Text>
                   </TouchableOpacity>
                 )}
               </View>
-            ) : null}
-
-            {isLink ? (
-              <Text style={s.note}>
-                This lesson streams from an external source, so it cannot be
-                saved for offline viewing.
-              </Text>
-            ) : (
-              <Text style={s.note}>
-                Protected content - plays inside the app only and cannot be
-                shared outside it.
-              </Text>
             )}
+
+            {/* Security info */}
+            <View style={s.securityRow}>
+              <Ionicons name="lock-closed" size={12} color={colors.muted} />
+              <Text style={s.note}>
+                {downloaded
+                  ? "Secured with 256-bit key stored in device Keychain."
+                  : isLink
+                  ? "Streams from an external source (cannot be saved offline)."
+                  : drmConfig
+                  ? "Protected by " + (Platform.OS === "ios" ? "FairPlay" : "Widevine") + " DRM — app-only."
+                  : "Protected content — plays inside the app only."}
+              </Text>
+            </View>
           </View>
         )}
 
@@ -368,17 +451,13 @@ export default function LessonDetailScreen() {
           <View style={s.videoPlaceholder}>
             <Ionicons name="document-text" size={64} color={colors.brand} />
             <Text style={s.videoLabel}>PDF Lesson</Text>
-            <Text style={s.videoHint}>
-              {lesson.contentKey ? "Tap to read" : "Content not uploaded yet"}
-            </Text>
           </View>
         )}
 
         {isText && (
           <View>
             <Text style={s.textContent}>
-              {lesson.contentKey ||
-                "Lesson content will appear here once uploaded."}
+              {lesson.contentKey || "Lesson content will appear here once uploaded."}
             </Text>
           </View>
         )}
@@ -387,7 +466,7 @@ export default function LessonDetailScreen() {
           <AssignmentLesson
             assignment={lesson.assignment}
             locked={!!lesson.locked}
-            prevTitle={prevTitle}
+            prevTitle={currentIdx > 0 ? course.lessons[currentIdx - 1]?.title : undefined}
             onSubmitted={reloadCourse}
           />
         )}
@@ -416,21 +495,9 @@ export default function LessonDetailScreen() {
           <Button
             title="Start Quiz"
             onPress={() => {
-              const quiz = course.quizzes?.find(
-                (q: any) => q.lessonId === lesson.id,
-              );
-              if (quiz) {
-                nav.navigate("QuizDetail", {
-                  quizId: quiz.id,
-                  courseId,
-                  title: quiz.title,
-                });
-              } else {
-                Alert.alert(
-                  "No Quiz",
-                  "Quiz not configured for this lesson yet.",
-                );
-              }
+              const quiz = course.quizzes?.find((q: any) => q.lessonId === lesson.id);
+              if (quiz) nav.navigate("QuizDetail", { quizId: quiz.id, courseId, title: quiz.title });
+              else Alert.alert("No Quiz", "Quiz not configured for this lesson yet.");
             }}
           />
         )}
@@ -462,51 +529,61 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  headerTitle: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.text,
-    marginLeft: 8,
-  },
-  body: { flex: 1 },
-  bodyContent: { padding: spacing.lg, paddingBottom: 40 },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.bg,
-  },
-  muted: { color: colors.muted },
-  video: {
-    width: "100%",
-    aspectRatio: 16 / 9,
-    backgroundColor: "#000",
-    borderRadius: radius.md,
-  },
-  videoPlaceholder: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 48,
-  },
-  videoLabel: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.text,
-    marginTop: 16,
-  },
-  videoHint: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 6,
-    textAlign: "center",
-  },
-  dlRow: {
+  headerTitle: { flex: 1, fontSize: 15, fontWeight: "700", color: colors.text, marginLeft: 8 },
+  drmBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginTop: 14,
+    gap: 4,
+    backgroundColor: "#ede9fe",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 6,
   },
+  drmText: { fontSize: 10, fontWeight: "800", color: "#7c3aed" },
+  body: { flex: 1 },
+  bodyContent: { padding: spacing.lg, paddingBottom: 40 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
+  muted: { color: colors.muted },
+  video: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000", borderRadius: radius.md },
+  videoPlaceholder: { alignItems: "center", justifyContent: "center", paddingVertical: 48 },
+  videoLabel: { fontSize: 18, fontWeight: "700", color: colors.text, marginTop: 16 },
+  videoHint: { fontSize: 13, color: colors.muted, marginTop: 6, textAlign: "center" },
+  tokenWarn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#fef9c3",
+    borderRadius: radius.md,
+    padding: 10,
+    marginBottom: 10,
+  },
+  tokenWarnText: { fontSize: 12, color: "#92400e", flex: 1 },
+  tokenWarnRed: { backgroundColor: "#fef2f2", borderColor: "#fecaca" },
+  tokenWarnTextRed: { color: "#991b1b" },
+  tokenOk: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  tokenOkText: { fontSize: 12, color: "#166534", flex: 1 },
+  progressWrap: {
+    height: 6,
+    backgroundColor: colors.border,
+    borderRadius: 3,
+    marginTop: 10,
+    overflow: "hidden",
+  },
+  progressBar: { height: 6, backgroundColor: colors.brand, borderRadius: 3 },
+  progressText: { fontSize: 11, color: colors.muted, marginTop: 4, textAlign: "right" },
+  dlRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14 },
   dlBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -519,12 +596,9 @@ const s = StyleSheet.create({
   dlBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   dlBadge: { flexDirection: "row", alignItems: "center", gap: 6 },
   dlBadgeText: { color: "#16a34a", fontWeight: "700", fontSize: 13 },
-  dlRemove: {
-    color: colors.muted,
-    fontSize: 13,
-    textDecorationLine: "underline",
-  },
-  note: { fontSize: 12, color: colors.muted, marginTop: 12, lineHeight: 18 },
+  dlRemove: { color: colors.muted, fontSize: 13, textDecorationLine: "underline" },
+  securityRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginTop: 12 },
+  note: { fontSize: 12, color: colors.muted, lineHeight: 18, flex: 1 },
   completeBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -563,7 +637,7 @@ const s = StyleSheet.create({
   nextText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
 
-// ============== Lesson notes + Q&A (mobile) ==============
+// ============ Lesson Notes + Q&A ============
 function LessonNotesQA({ lessonId }: { lessonId: string }) {
   const [tab, setTab] = useState<"notes" | "qa">("notes");
   const [notes, setNotes] = useState<any[]>([]);
@@ -597,16 +671,10 @@ function LessonNotesQA({ lessonId }: { lessonId: string }) {
     if (!noteBody.trim()) return;
     setBusy(true);
     try {
-      await api("/courses/notes", {
-        method: "POST",
-        body: { lessonId, body: noteBody.trim() },
-      });
+      await api("/courses/notes", { method: "POST", body: { lessonId, body: noteBody.trim() } });
       setNoteBody("");
       loadNotes();
-    } catch {
-    } finally {
-      setBusy(false);
-    }
+    } catch {} finally { setBusy(false); }
   }
   async function delNote(id: string) {
     await api("/courses/notes/" + id, { method: "DELETE" }).catch(() => {});
@@ -616,168 +684,82 @@ function LessonNotesQA({ lessonId }: { lessonId: string }) {
     if (!qBody.trim()) return;
     setBusy(true);
     try {
-      await api("/courses/questions", {
-        method: "POST",
-        body: { lessonId, body: qBody.trim() },
-      });
+      await api("/courses/questions", { method: "POST", body: { lessonId, body: qBody.trim() } });
       setQBody("");
       loadQuestions();
-    } catch {
-    } finally {
-      setBusy(false);
-    }
+    } catch {} finally { setBusy(false); }
   }
   async function sendAnswer(qid: string) {
     if (!answerBody.trim()) return;
     setBusy(true);
     try {
-      await api("/courses/questions/" + qid + "/answers", {
-        method: "POST",
-        body: { body: answerBody.trim() },
-      });
+      await api("/courses/questions/" + qid + "/answers", { method: "POST", body: { body: answerBody.trim() } });
       setAnswerBody("");
       setAnswerFor(null);
       loadQuestions();
-    } catch {
-    } finally {
-      setBusy(false);
-    }
+    } catch {} finally { setBusy(false); }
   }
 
   return (
     <View style={qs.wrap}>
       <View style={qs.tabs}>
         <TouchableOpacity onPress={() => setTab("notes")} style={qs.tabBtn}>
-          <Ionicons
-            name="create-outline"
-            size={16}
-            color={tab === "notes" ? colors.brand : colors.muted}
-          />
-          <Text style={[qs.tabText, tab === "notes" ? qs.tabActive : null]}>
-            My Notes
-          </Text>
+          <Ionicons name="create-outline" size={16} color={tab === "notes" ? colors.brand : colors.muted} />
+          <Text style={[qs.tabText, tab === "notes" ? qs.tabActive : null]}>My Notes</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setTab("qa")} style={qs.tabBtn}>
-          <Ionicons
-            name="chatbubbles-outline"
-            size={16}
-            color={tab === "qa" ? colors.brand : colors.muted}
-          />
-          <Text style={[qs.tabText, tab === "qa" ? qs.tabActive : null]}>
-            Q&A ({questions.length})
-          </Text>
+          <Ionicons name="chatbubbles-outline" size={16} color={tab === "qa" ? colors.brand : colors.muted} />
+          <Text style={[qs.tabText, tab === "qa" ? qs.tabActive : null]}>Q&A ({questions.length})</Text>
         </TouchableOpacity>
       </View>
-
       {tab === "notes" ? (
         <View>
-          <TextInput
-            value={noteBody}
-            onChangeText={setNoteBody}
-            placeholder="Add a private note..."
-            placeholderTextColor={colors.muted}
-            multiline
-            style={qs.input}
-          />
-          <TouchableOpacity
-            style={qs.sendBtn}
-            onPress={addNote}
-            disabled={busy}
-          >
-            <Text style={qs.sendText}>Save note</Text>
-          </TouchableOpacity>
+          <TextInput value={noteBody} onChangeText={setNoteBody} placeholder="Add a private note..." placeholderTextColor={colors.muted} multiline style={qs.input} />
+          <TouchableOpacity style={qs.sendBtn} onPress={addNote} disabled={busy}><Text style={qs.sendText}>Save note</Text></TouchableOpacity>
           {notes.map((n) => (
             <View key={n.id} style={qs.noteRow}>
               <Text style={qs.noteText}>{n.body}</Text>
-              <TouchableOpacity onPress={() => delNote(n.id)} hitSlop={8}>
-                <Ionicons name="trash-outline" size={16} color={colors.red} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => delNote(n.id)} hitSlop={8}><Ionicons name="trash-outline" size={16} color={colors.red} /></TouchableOpacity>
             </View>
           ))}
-          {notes.length === 0 ? (
-            <Text style={qs.empty}>
-              Your notes are private and only visible to you.
-            </Text>
-          ) : null}
+          {notes.length === 0 ? <Text style={qs.empty}>Your notes are private and only visible to you.</Text> : null}
         </View>
       ) : (
         <View>
-          <TextInput
-            value={qBody}
-            onChangeText={setQBody}
-            placeholder="Ask a question about this lesson..."
-            placeholderTextColor={colors.muted}
-            multiline
-            style={qs.input}
-          />
-          <TouchableOpacity style={qs.sendBtn} onPress={ask} disabled={busy}>
-            <Text style={qs.sendText}>Post question</Text>
-          </TouchableOpacity>
+          <TextInput value={qBody} onChangeText={setQBody} placeholder="Ask a question about this lesson..." placeholderTextColor={colors.muted} multiline style={qs.input} />
+          <TouchableOpacity style={qs.sendBtn} onPress={ask} disabled={busy}><Text style={qs.sendText}>Post question</Text></TouchableOpacity>
           {questions.map((q) => (
             <View key={q.id} style={qs.qCard}>
               <View style={qs.qHead}>
                 <Text style={qs.qAuthor}>{q.user?.name || "Learner"}</Text>
-                {q.resolved ? (
-                  <View style={qs.resolvedTag}>
-                    <Ionicons name="checkmark" size={12} color="#16a34a" />
-                    <Text style={qs.resolvedText}>Resolved</Text>
-                  </View>
-                ) : null}
+                {q.resolved ? (<View style={qs.resolvedTag}><Ionicons name="checkmark" size={12} color="#16a34a" /><Text style={qs.resolvedText}>Resolved</Text></View>) : null}
               </View>
               <Text style={qs.qBody}>{q.body}</Text>
               {(q.answers || []).map((a: any) => (
                 <View key={a.id} style={qs.answer}>
                   <View style={qs.qHead}>
                     <Text style={qs.aAuthor}>{a.user?.name || "User"}</Text>
-                    {a.isInstructor ? (
-                      <View style={qs.instrTag}>
-                        <Text style={qs.instrText}>Instructor</Text>
-                      </View>
-                    ) : null}
+                    {a.isInstructor ? (<View style={qs.instrTag}><Text style={qs.instrText}>Instructor</Text></View>) : null}
                   </View>
                   <Text style={qs.aBody}>{a.body}</Text>
                 </View>
               ))}
               {answerFor === q.id ? (
                 <View>
-                  <TextInput
-                    value={answerBody}
-                    onChangeText={setAnswerBody}
-                    placeholder="Write an answer..."
-                    placeholderTextColor={colors.muted}
-                    multiline
-                    style={qs.input}
-                  />
+                  <TextInput value={answerBody} onChangeText={setAnswerBody} placeholder="Write an answer..." placeholderTextColor={colors.muted} multiline style={qs.input} />
                   <View style={qs.answerActions}>
-                    <TouchableOpacity
-                      style={qs.sendBtn}
-                      onPress={() => sendAnswer(q.id)}
-                      disabled={busy}
-                    >
-                      <Text style={qs.sendText}>Reply</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setAnswerFor(null)}>
-                      <Text style={qs.cancel}>Cancel</Text>
-                    </TouchableOpacity>
+                    <TouchableOpacity style={qs.sendBtn} onPress={() => sendAnswer(q.id)} disabled={busy}><Text style={qs.sendText}>Reply</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => setAnswerFor(null)}><Text style={qs.cancel}>Cancel</Text></TouchableOpacity>
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity
-                  onPress={() => {
-                    setAnswerFor(q.id);
-                    setAnswerBody("");
-                  }}
-                >
+                <TouchableOpacity onPress={() => { setAnswerFor(q.id); setAnswerBody(""); }}>
                   <Text style={qs.replyLink}>Reply</Text>
                 </TouchableOpacity>
               )}
             </View>
           ))}
-          {questions.length === 0 ? (
-            <Text style={qs.empty}>
-              No questions yet. Start the conversation!
-            </Text>
-          ) : null}
+          {questions.length === 0 ? <Text style={qs.empty}>No questions yet. Start the conversation!</Text> : null}
         </View>
       )}
     </View>
@@ -785,88 +767,29 @@ function LessonNotesQA({ lessonId }: { lessonId: string }) {
 }
 
 const qs = StyleSheet.create({
-  wrap: {
-    marginTop: spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.md,
-  },
+  wrap: { marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md },
   tabs: { flexDirection: "row", gap: 18, marginBottom: spacing.md },
   tabBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
   tabText: { fontSize: 14, fontWeight: "600", color: colors.muted },
   tabActive: { color: colors.brand },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 10,
-    minHeight: 44,
-    color: colors.text,
-    backgroundColor: colors.card,
-    textAlignVertical: "top",
-  },
-  sendBtn: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.brand,
-    borderRadius: radius.pill,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginTop: 8,
-  },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: 10, minHeight: 44, color: colors.text, backgroundColor: colors.card, textAlignVertical: "top" },
+  sendBtn: { alignSelf: "flex-start", backgroundColor: colors.brand, borderRadius: radius.pill, paddingHorizontal: 16, paddingVertical: 8, marginTop: 8 },
   sendText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  noteRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: 10,
-    marginTop: 8,
-  },
+  noteRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 10, backgroundColor: colors.card, borderRadius: radius.md, padding: 10, marginTop: 8 },
   noteText: { flex: 1, color: colors.text, fontSize: 14 },
   empty: { color: colors.muted, fontSize: 13, marginTop: 10 },
-  qCard: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 10,
-    marginTop: 10,
-  },
+  qCard: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: 10, marginTop: 10 },
   qHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   qAuthor: { fontWeight: "700", color: colors.text, fontSize: 13 },
   qBody: { color: colors.text, fontSize: 14, marginTop: 4 },
-  answer: {
-    borderLeftWidth: 2,
-    borderLeftColor: colors.border,
-    paddingLeft: 10,
-    marginTop: 8,
-  },
+  answer: { borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: 10, marginTop: 8 },
   aAuthor: { fontWeight: "700", color: colors.text, fontSize: 12 },
   aBody: { color: colors.muted, fontSize: 13, marginTop: 2 },
-  instrTag: {
-    backgroundColor: colors.brandLight,
-    borderRadius: radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
+  instrTag: { backgroundColor: colors.brandLight, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
   instrText: { color: colors.brand, fontSize: 11, fontWeight: "700" },
-  resolvedTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: "#dcfce7",
-    borderRadius: radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
+  resolvedTag: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#dcfce7", borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
   resolvedText: { color: "#16a34a", fontSize: 11, fontWeight: "700" },
-  replyLink: {
-    color: colors.brand,
-    fontWeight: "700",
-    fontSize: 12,
-    marginTop: 8,
-  },
+  replyLink: { color: colors.brand, fontWeight: "700", fontSize: 12, marginTop: 8 },
   cancel: { color: colors.muted, fontWeight: "600", fontSize: 13 },
   answerActions: { flexDirection: "row", alignItems: "center", gap: 14 },
 });

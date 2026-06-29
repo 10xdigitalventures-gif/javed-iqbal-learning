@@ -35,6 +35,18 @@ export default function AdminClients() {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
+  async function setDeviceLimit(u: User, n: number) {
+    try {
+      await api(`/users/${u.id}`, {
+        method: "PATCH",
+        body: { maxDevices: n },
+      });
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Could not update device limit");
+    }
+  }
+
   async function load() {
     try {
       const query = buildQuery({
@@ -175,6 +187,21 @@ export default function AdminClients() {
                     <p className="text-sm text-slate-500">{u.email}</p>
                   </div>
                   <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-slate-500">Devices</span>
+                      <Select
+                        value={String(u.maxDevices ?? 2)}
+                        onChange={(e) =>
+                          setDeviceLimit(u, Number(e.target.value))
+                        }
+                      >
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                      </Select>
+                    </div>
                     <Badge color={u.isActive ? "green" : "red"}>
                       {u.isActive ? "Active" : "Inactive"}
                     </Badge>

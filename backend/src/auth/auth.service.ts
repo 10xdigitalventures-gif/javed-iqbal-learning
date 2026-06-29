@@ -23,8 +23,94 @@ export class AuthService {
     private mail: MailService,
   ) {}
 
-  private sign(user: { id: string; email: string; role: Role }) {
-    return this.jwt.sign({ sub: user.id, email: user.email, role: user.role });
+  private sign(
+    user: { id: string; email: string; role: Role },
+    deviceRowId?: string,
+  ) {
+    return this.jwt.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      ...(deviceRowId ? { did: deviceRowId } : {}),
+    });
+  }
+
+  // Type for the optional device info sent by mobile clients on auth.
+  // Web clients can omit it (then no device row is created / enforced).
+  private async registerDevice(
+    userId: string,
+    device?: { deviceId?: string; label?: string; platform?: string },
+  ): Promise<string | undefined> {
+    if (!device?.deviceId) return undefined;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { maxDevices: true },
+    });
+    const limit = Math.max(1, user?.maxDevices ?? 2);
+
+    // Reuse the row for this physical device if it already exists.
+    const existing = await this.prisma.userDevice.findUnique({
+      where: { userId_deviceId: { userId, deviceId: device.deviceId } },
+    });
+    const row = await this.prisma.userDevice.upsert({
+      where: { userId_deviceId: { userId, deviceId: device.deviceId } },
+      create: {
+        userId,
+        deviceId: device.deviceId,
+        label: device.label ?? null,
+        platform: device.platform ?? null,
+      },
+      update: {
+        label: device.label ?? existing?.label ?? null,
+        platform: device.platform ?? existing?.platform ?? null,
+        lastSeenAt: new Date(),
+        revokedAt: null,
+      },
+    });
+
+    // Enforce the concurrent device limit: if too many active devices, sign out
+    // the oldest ones (Netflix/YouTube style) so the new login always works.
+    const active = await this.prisma.userDevice.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { lastSeenAt: "desc" },
+    });
+    if (active.length > limit) {
+      const toRevoke = active.slice(limit); // keep newest `limit`, kick the rest
+      await this.prisma.userDevice.updateMany({
+        where: { id: { in: toRevoke.map((d) => d.id) } },
+        data: { revokedAt: new Date() },
+      });
+    }
+    return row.id;
+  }
+
+  // List the signed-in devices for a user (most recent first).
+  async listDevices(userId: string, currentDeviceRowId?: string) {
+    const rows = await this.prisma.userDevice.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { lastSeenAt: "desc" },
+    });
+    return rows.map((d) => ({
+      id: d.id,
+      label: d.label || d.platform || "Unknown device",
+      platform: d.platform,
+      lastSeenAt: d.lastSeenAt,
+      createdAt: d.createdAt,
+      current: !!currentDeviceRowId && d.id === currentDeviceRowId,
+    }));
+  }
+
+  // Sign out one device remotely. Its next request is rejected by the guard.
+  async revokeDevice(userId: string, deviceRowId: string) {
+    const row = await this.prisma.userDevice.findFirst({
+      where: { id: deviceRowId, userId },
+    });
+    if (!row) throw new BadRequestException("Device not found");
+    await this.prisma.userDevice.update({
+      where: { id: deviceRowId },
+      data: { revokedAt: new Date() },
+    });
+    return { revoked: true };
   }
 
   private publicUser(u: {
@@ -45,7 +131,7 @@ export class AuthService {
     };
   }
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, device?: { deviceId?: string; label?: string; platform?: string }) {
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -64,10 +150,11 @@ export class AuthService {
       },
     });
     await this.logActivity(user.id, "REGISTER");
-    return { token: this.sign(user), user: this.publicUser(user) };
+    const did = await this.registerDevice(user.id, device);
+    return { token: this.sign(user, did), user: this.publicUser(user) };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, device?: { deviceId?: string; label?: string; platform?: string }) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -77,7 +164,8 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, user.password);
     if (!ok) throw new UnauthorizedException("Invalid credentials");
     await this.logActivity(user.id, "LOGIN");
-    return { token: this.sign(user), user: this.publicUser(user) };
+    const did = await this.registerDevice(user.id, device);
+    return { token: this.sign(user, did), user: this.publicUser(user) };
   }
 
   // --- OTP (login / verification) ---
@@ -102,13 +190,14 @@ export class AuthService {
     return { sent: true };
   }
 
-  async verifyOtp(email: string, code: string) {
+  async verifyOtp(email: string, code: string, device?: { deviceId?: string; label?: string; platform?: string }) {
     const otp = await this.consumeOtp(email, code, OtpPurpose.LOGIN);
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) throw new UnauthorizedException("Invalid code");
     void otp;
     await this.logActivity(user.id, "LOGIN_OTP");
-    return { token: this.sign(user), user: this.publicUser(user) };
+    const did = await this.registerDevice(user.id, device);
+    return { token: this.sign(user, did), user: this.publicUser(user) };
   }
 
   // --- Password reset ---

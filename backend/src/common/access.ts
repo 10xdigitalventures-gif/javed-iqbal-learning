@@ -5,6 +5,9 @@ export type AuthUser = {
   userId: string;
   email: string;
   role: Role;
+  // Set when the JWT carries a device id (mobile). Used for device management
+  // and concurrent-device enforcement.
+  deviceRowId?: string;
 };
 
 export function isAdmin(user: AuthUser) {

@@ -56,3 +56,10 @@ body {
   line-height: 2.6;
   font-size: 1.15em;
 }
+
+/* Rich text editor placeholder for the assignment editor */
+.rte-content:empty:before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+}

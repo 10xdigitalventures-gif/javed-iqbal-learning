@@ -25,6 +25,7 @@ const PUBLIC_SELECT = {
   expertise: true,
   bio: true,
   avatarUrl: true,
+  maxDevices: true,
   createdAt: true,
 };
 

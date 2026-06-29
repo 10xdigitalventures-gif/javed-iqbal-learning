@@ -22,8 +22,10 @@ import { ProgressBar } from "../ui";
 import { trackEvent } from "../activity";
 import {
   downloadLesson,
+  downloadLessonSecure,
   downloadedCountForCourse,
   isLessonDownloaded,
+  enforceCourseAccess,
 } from "../offlineCourse";
 
 // Human-friendly remaining time until an ISO timestamp.
@@ -80,13 +82,21 @@ export default function CourseDetailScreen() {
     useCallback(() => {
       setLoading(true);
       api("/courses/" + idOrSlug)
-        .then((d: any) => {
+        .then(async (d: any) => {
           setCourse(d);
           trackEvent("course_viewed", { courseId: d?.id });
-          if (d?.id)
+          if (d?.id) {
+            // Wipe offline copies if access has expired / been revoked.
+            if (d?.accessExpired || d?.hasAccess === false) {
+              await enforceCourseAccess(d.id, {
+                accessExpired: d?.accessExpired,
+                hasAccess: d?.hasAccess,
+              }).catch(() => {});
+            }
             downloadedCountForCourse(d.id)
               .then(setSavedCount)
               .catch(() => {});
+          }
         })
         .finally(() => setLoading(false));
     }, [idOrSlug]),
@@ -235,13 +245,43 @@ export default function CourseDetailScreen() {
           "/media/sign?key=" + encodeURIComponent(l.contentKey),
         );
         if (signed?.url) {
-          await downloadLesson({
-            lessonId: l.id,
-            courseId: course.id,
-            courseTitle: course.title,
-            title: l.title,
-            signedUrl: signed.url,
-          });
+          // Phase 2: get download token + AES key
+          let token = "", aesKeyVal = "", tokenExpiresAt = 0;
+          let accessUntilVal: number | null = null;
+          let offlineValidityDaysVal: number | undefined = undefined;
+          try {
+            const tkn: any = await api("/media/download-token", {
+              method: "POST",
+              body: { lessonId: l.id },
+            });
+            token = tkn?.token ?? "";
+            aesKeyVal = tkn?.aesKey ?? "";
+            tokenExpiresAt = tkn?.expiresAt ?? 0;
+            accessUntilVal = tkn?.accessUntil ?? null;
+            offlineValidityDaysVal = tkn?.offlineValidityDays;
+          } catch {}
+          if (token) {
+            await downloadLessonSecure({
+              lessonId: l.id,
+              courseId: course.id,
+              courseTitle: course.title,
+              title: l.title,
+              signedUrl: signed.url,
+              token,
+              aesKey: aesKeyVal,
+              tokenExpiresAt,
+              accessUntil: accessUntilVal,
+              offlineValidityDays: offlineValidityDaysVal,
+            });
+          } else {
+            await downloadLesson({
+              lessonId: l.id,
+              courseId: course.id,
+              courseTitle: course.title,
+              title: l.title,
+              signedUrl: signed.url,
+            });
+          }
           ok++;
           setSavedCount(ok);
         }

@@ -25,6 +25,18 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  devicePlatform?: string;
 }
 
 export class LoginDto {
@@ -33,6 +45,18 @@ export class LoginDto {
 
   @IsString()
   password: string;
+
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  devicePlatform?: string;
 }
 
 export class RequestOtpDto {
@@ -46,6 +70,18 @@ export class VerifyOtpDto {
 
   @IsString()
   code: string;
+
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  devicePlatform?: string;
 }
 
 export class ForgotPasswordDto {

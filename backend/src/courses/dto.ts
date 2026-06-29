@@ -13,6 +13,7 @@ import {
   LessonSource,
   SubmissionStatus,
   ModuleLockMode,
+  UnlockPolicy,
   QuizQuestionType,
 } from "@prisma/client";
 
@@ -24,6 +25,12 @@ export class CreateCourseDto {
   @IsOptional() @IsNumber() @Min(0) price?: number;
   @IsOptional() @IsString() currency?: string;
   @IsOptional() @IsBoolean() isPublished?: boolean;
+  // Default access duration (days) granted on enrollment. 0/null = lifetime.
+  @IsOptional() @IsInt() @Min(0) accessDurationDays?: number;
+  // OPEN | SEQUENTIAL | DRIP
+  @IsOptional() @IsEnum(UnlockPolicy) unlockPolicy?: UnlockPolicy;
+  // YouTube-style offline re-validation window (days).
+  @IsOptional() @IsInt() @Min(1) offlineValidityDays?: number;
 }
 
 export class UpdateCourseDto extends CreateCourseDto {
@@ -38,6 +45,9 @@ export class CreateModuleDto {
   // SINGLE = open when previous module completed; BOTH = + time delay elapsed.
   @IsOptional() @IsEnum(ModuleLockMode) lockMode?: ModuleLockMode;
   @IsOptional() @IsInt() @Min(0) unlockDelayHours?: number;
+  @IsOptional() @IsBoolean() isPublished?: boolean;
+  // Parent module id when creating a SUB-MODULE (nested under another module).
+  @IsOptional() @IsString() parentId?: string;
 }
 
 export class UpdateModuleDto {
@@ -45,6 +55,8 @@ export class UpdateModuleDto {
   @IsOptional() @IsInt() @Min(0) index?: number;
   @IsOptional() @IsEnum(ModuleLockMode) lockMode?: ModuleLockMode;
   @IsOptional() @IsInt() @Min(0) unlockDelayHours?: number;
+  @IsOptional() @IsString() parentId?: string;
+  @IsOptional() @IsBoolean() isPublished?: boolean;
 }
 
 export class CreateLessonDto {
@@ -67,6 +79,7 @@ export class CreateLessonDto {
   @IsOptional() @IsEnum(LessonSource) source?: LessonSource;
   @IsOptional() @IsInt() durationSec?: number;
   @IsOptional() @IsBoolean() isPreview?: boolean;
+  @IsOptional() @IsBoolean() isPublished?: boolean;
 }
 
 // Partial update for an existing lesson (module assignment, lock config, etc.).
@@ -84,6 +97,7 @@ export class UpdateLessonDto {
   @IsOptional() @IsEnum(LessonSource) source?: LessonSource;
   @IsOptional() @IsInt() durationSec?: number;
   @IsOptional() @IsBoolean() isPreview?: boolean;
+  @IsOptional() @IsBoolean() isPublished?: boolean;
 }
 
 export class CreateQuizDto {
@@ -188,6 +202,9 @@ export class CreateAssignmentDto {
   @IsOptional() @IsString() lessonId?: string;
   // JSON-encoded array of instructor reference files: [{ key, name, size }].
   @IsOptional() @IsString() attachments?: string;
+  @IsOptional() @IsString() thumbnailUrl?: string;
+  @IsOptional() @IsBoolean() graded?: boolean;
+  @IsOptional() @IsString() completionMessage?: string;
 }
 
 export class UpdateAssignmentDto {
@@ -195,6 +212,9 @@ export class UpdateAssignmentDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() lessonId?: string;
   @IsOptional() @IsString() attachments?: string;
+  @IsOptional() @IsString() thumbnailUrl?: string;
+  @IsOptional() @IsBoolean() graded?: boolean;
+  @IsOptional() @IsString() completionMessage?: string;
 }
 
 export class SubmitAssignmentDto {
@@ -211,4 +231,97 @@ export class GradeSubmissionDto {
   @IsOptional() @IsString() feedback?: string;
   // Defaults to APPROVED when omitted.
   @IsOptional() @IsEnum(SubmissionStatus) status?: SubmissionStatus;
+}
+
+// ---- Offers (course access pricing tiers) ----
+export class CreateOfferDto {
+  @IsString() courseId: string;
+  @IsString() name: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsNumber() @Min(0) price?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsInt() @Min(0) accessDurationDays?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) index?: number;
+}
+
+export class UpdateOfferDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsNumber() @Min(0) price?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsInt() @Min(0) accessDurationDays?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) index?: number;
+}
+
+export class GrantOfferDto {
+  @IsString() userId: string;
+}
+
+// ---- Global coupons ----
+export class CreateCouponDto {
+  @IsString() code: string;
+  @IsOptional() @IsString() discountType?: string; // PERCENT | FIXED
+  @IsOptional() @IsNumber() @Min(0) amount?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() expiresAt?: string;
+  @IsOptional() @IsInt() @Min(0) maxRedemptions?: number;
+}
+
+export class UpdateCouponDto {
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsString() discountType?: string;
+  @IsOptional() @IsNumber() @Min(0) amount?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() expiresAt?: string;
+  @IsOptional() @IsInt() @Min(0) maxRedemptions?: number;
+}
+
+export class ValidateCouponDto {
+  @IsString() code: string;
+  @IsNumber() @Min(0) amount: number;
+}
+
+// ---- Course-level comments ----
+export class CreateCommentDto {
+  @IsString() body: string;
+  @IsOptional() @IsString() lessonId?: string;
+  @IsOptional() @IsString() parentId?: string;
+}
+
+// ---- Course badges (welcome / completion) ----
+export class CreateBadgeDto {
+  @IsString() courseId: string;
+  @IsOptional() @IsString() type?: string; // WELCOME | COMPLETION
+  @IsString() name: string;
+  @IsOptional() @IsString() imageUrl?: string;
+  @IsOptional() @IsString() message?: string;
+}
+
+export class UpdateBadgeDto {
+  @IsOptional() @IsString() type?: string;
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() imageUrl?: string;
+  @IsOptional() @IsString() message?: string;
+}
+
+// ---- Live sessions ----
+export class CreateLiveSessionDto {
+  @IsString() courseId: string;
+  @IsString() title: string;
+  @IsOptional() @IsString() description?: string;
+  @IsString() scheduledAt: string; // ISO datetime
+  @IsOptional() @IsInt() @Min(1) durationMin?: number;
+  @IsOptional() @IsString() joinUrl?: string;
+  @IsOptional() @IsString() status?: string;
+}
+
+export class UpdateLiveSessionDto {
+  @IsOptional() @IsString() title?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsString() scheduledAt?: string;
+  @IsOptional() @IsInt() @Min(1) durationMin?: number;
+  @IsOptional() @IsString() joinUrl?: string;
+  @IsOptional() @IsString() status?: string;
 }

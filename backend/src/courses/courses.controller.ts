@@ -37,6 +37,17 @@ import {
   UpdateLessonNoteDto,
   AskQuestionDto,
   AnswerQuestionDto,
+  CreateOfferDto,
+  UpdateOfferDto,
+  GrantOfferDto,
+  CreateCouponDto,
+  UpdateCouponDto,
+  ValidateCouponDto,
+  CreateCommentDto,
+  CreateBadgeDto,
+  UpdateBadgeDto,
+  CreateLiveSessionDto,
+  UpdateLiveSessionDto,
 } from "./dto";
 
 @Controller("courses")
@@ -175,6 +186,34 @@ export class CoursesController {
   @Post(":courseId/enroll")
   enroll(@Param("courseId") courseId: string, @CurrentUser() user: AuthUser) {
     return this.service.enroll(user.userId, courseId);
+  }
+
+  // ---- Admin: per-user access management ----
+  // List learners enrolled in a course with their access status.
+  @Get(":courseId/enrollments")
+  @Roles(Role.ADMIN)
+  listEnrollments(@Param("courseId") courseId: string) {
+    return this.service.listEnrollments(courseId);
+  }
+
+  // Grant / extend access. body: { userId, days? } (days=0/null => lifetime).
+  @Post(":courseId/access/grant")
+  @Roles(Role.ADMIN)
+  grantAccess(
+    @Param("courseId") courseId: string,
+    @Body() body: { userId: string; days?: number | null },
+  ) {
+    return this.service.grantAccess(body.userId, courseId, body.days);
+  }
+
+  // Revoke access immediately. body: { userId }.
+  @Post(":courseId/access/revoke")
+  @Roles(Role.ADMIN)
+  revokeAccess(
+    @Param("courseId") courseId: string,
+    @Body() body: { userId: string },
+  ) {
+    return this.service.revokeAccess(body.userId, courseId);
   }
 
   // ---- Quizzes ----
@@ -419,5 +458,138 @@ export class CoursesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.issueCertificate(user.userId, courseId);
+  }
+
+  // ======================= Offers (access pricing tiers) =======================
+  @Get(":courseId/offers")
+  listOffers(@Param("courseId") courseId: string) {
+    return this.service.listOffers(courseId);
+  }
+
+  @Post("offers")
+  @Roles(Role.ADMIN)
+  createOffer(@Body() dto: CreateOfferDto) {
+    return this.service.createOffer(dto);
+  }
+
+  @Patch("offers/:id")
+  @Roles(Role.ADMIN)
+  updateOffer(@Param("id") id: string, @Body() dto: UpdateOfferDto) {
+    return this.service.updateOffer(id, dto);
+  }
+
+  @Delete("offers/:id")
+  @Roles(Role.ADMIN)
+  removeOffer(@Param("id") id: string) {
+    return this.service.removeOffer(id);
+  }
+
+  // Admin: directly grant a user access through an offer (manual payment).
+  @Post("offers/:id/grant")
+  @Roles(Role.ADMIN)
+  grantOffer(@Param("id") id: string, @Body() dto: GrantOfferDto) {
+    return this.service.grantOfferAccess(id, dto.userId);
+  }
+
+  // ============================= Global coupons ===============================
+  @Get("coupons")
+  @Roles(Role.ADMIN)
+  listCoupons() {
+    return this.service.listCoupons();
+  }
+
+  @Post("coupons")
+  @Roles(Role.ADMIN)
+  createCoupon(@Body() dto: CreateCouponDto) {
+    return this.service.createCoupon(dto);
+  }
+
+  @Patch("coupons/:id")
+  @Roles(Role.ADMIN)
+  updateCoupon(@Param("id") id: string, @Body() dto: UpdateCouponDto) {
+    return this.service.updateCoupon(id, dto);
+  }
+
+  @Delete("coupons/:id")
+  @Roles(Role.ADMIN)
+  removeCoupon(@Param("id") id: string) {
+    return this.service.removeCoupon(id);
+  }
+
+  // Validate a coupon at checkout (any authenticated user). Global.
+  @Post("coupons/validate")
+  validateCoupon(@Body() dto: ValidateCouponDto) {
+    return this.service.validateCoupon(dto.code, dto.amount);
+  }
+
+  // ========================== Course-level comments ===========================
+  @Get(":courseId/comments")
+  listComments(@Param("courseId") courseId: string) {
+    return this.service.listComments(courseId);
+  }
+
+  @Post(":courseId/comments")
+  createComment(
+    @Param("courseId") courseId: string,
+    @Body() dto: CreateCommentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.createComment(courseId, user.userId, dto);
+  }
+
+  @Delete("comments/:id")
+  removeComment(@Param("id") id: string) {
+    return this.service.removeComment(id);
+  }
+
+  // ======================= Course badges (welcome/etc) ========================
+  @Get(":courseId/badges")
+  listBadges(@Param("courseId") courseId: string) {
+    return this.service.listBadges(courseId);
+  }
+
+  @Post("badges")
+  @Roles(Role.ADMIN)
+  createBadge(@Body() dto: CreateBadgeDto) {
+    return this.service.createBadge(dto);
+  }
+
+  @Patch("badges/:id")
+  @Roles(Role.ADMIN)
+  updateBadge(@Param("id") id: string, @Body() dto: UpdateBadgeDto) {
+    return this.service.updateBadge(id, dto);
+  }
+
+  @Delete("badges/:id")
+  @Roles(Role.ADMIN)
+  removeBadge(@Param("id") id: string) {
+    return this.service.removeBadge(id);
+  }
+
+  // ============================== Live sessions ===============================
+  @Get(":courseId/live-sessions")
+  listLiveSessions(@Param("courseId") courseId: string) {
+    return this.service.listLiveSessions(courseId);
+  }
+
+  @Post("live-sessions")
+  @Roles(Role.ADMIN)
+  createLiveSession(@Body() dto: CreateLiveSessionDto) {
+    return this.service.createLiveSession(dto);
+  }
+
+  @Patch("live-sessions/:id")
+  @Roles(Role.ADMIN)
+  updateLiveSession(
+    @Param("id") id: string,
+    @Body() dto: UpdateLiveSessionDto,
+  ) {
+    return this.service.updateLiveSession(id, dto);
+  }
+
+  @Delete("live-sessions/:id")
+  @Roles(Role.ADMIN)
+  removeLiveSession(@Param("id") id: string) {
+    return this.service.removeLiveSession(id);
   }
 }

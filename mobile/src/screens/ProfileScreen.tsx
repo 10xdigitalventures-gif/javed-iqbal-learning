@@ -118,6 +118,12 @@ export default function ProfileScreen() {
       onPress: () => nav.navigate("NotificationSettings", {}),
     },
     {
+      icon: "phone-portrait-outline",
+      label: "Devices",
+      hint: "See and sign out devices logged in to your account",
+      onPress: () => nav.navigate("Devices", {}),
+    },
+    {
       icon: "cube-outline",
       label: "Hard copy orders",
       hint: "Track your physical book deliveries",

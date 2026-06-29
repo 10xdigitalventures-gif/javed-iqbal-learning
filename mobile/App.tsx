@@ -21,6 +21,7 @@ import CommunityScreen from "./src/screens/CommunityScreen";
 import MessagesScreen from "./src/screens/MessagesScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
 import NotificationSettingsScreen from "./src/screens/NotificationSettingsScreen";
+import DevicesScreen from "./src/screens/DevicesScreen";
 import BookDetailScreen from "./src/screens/BookDetailScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
 import AudioBooksScreen from "./src/screens/AudioBooksScreen";
@@ -166,6 +167,11 @@ function Root() {
             name="NotificationSettings"
             component={NotificationSettingsScreen}
             options={{ title: "Notifications" } as any}
+          />
+          <Stack.Screen
+            name="Devices"
+            component={DevicesScreen}
+            options={{ title: "Devices" } as any}
           />
           <Stack.Screen
             name="Certificates"

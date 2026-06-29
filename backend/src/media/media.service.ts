@@ -1,18 +1,22 @@
+
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
 import { spawn, spawnSync } from "child_process";
 import { statSync } from "fs";
 import { basename, dirname, extname, join } from "path";
 import { PrismaService } from "../prisma/prisma.service";
+import * as crypto from "crypto";
 
-// Server-side media inspection. We never trust a client-supplied duration; for
-// audio/video we probe the actual file with ffprobe and return the real value.
+// Server-side media inspection plus secure download / DRM token generation.
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+  ) {}
 
-  // Map a MIME type to the coarse Media Library category used for filtering.
   categoryFromMime(mime: string): string {
     if (mime.startsWith("image/")) return "image";
     if (mime.startsWith("video/")) return "video";
@@ -21,7 +25,6 @@ export class MediaService {
     return "file";
   }
 
-  // Persist an uploaded object as a reusable Media Library item.
   recordAsset(data: {
     ownerId: string;
     key: string;
@@ -45,8 +48,6 @@ export class MediaService {
     });
   }
 
-  // List Media Library items. Admins may list everything; everyone else sees
-  // only their own uploads. Optional `type` filters by category.
   listAssets(opts: { ownerId?: string; type?: string }) {
     const where: { ownerId?: string; type?: string } = {};
     if (opts.ownerId) where.ownerId = opts.ownerId;
@@ -69,168 +70,193 @@ export class MediaService {
     return { ok: true };
   }
 
-  // Returns the media duration in whole seconds, or null when it cannot be
-  // determined (e.g. ffprobe missing or non-media file).
+  // ---------------------------------------------------------------------------
+  // Phase 2: Secure download token
+  // Returns a 24-hour JWT that proves the user has purchased this lesson, plus
+  // a random 256-bit AES key that the client should store in the device Keychain
+  // and use to mark the downloaded file as "belonging" to this user/device.
+  // ---------------------------------------------------------------------------
+  async generateDownloadToken(
+    userId: string,
+    lessonId: string,
+  ): Promise<{
+    token: string;
+    aesKey: string;
+    expiresAt: number;
+    accessUntil: number | null;
+    offlineValidityDays: number;
+  }> {
+    // Verify the user actually has access to this lesson
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      include: { course: { include: { enrollments: { where: { userId } } } } },
+    });
+    if (!lesson) throw new NotFoundException("Lesson not found");
+    const enrollment =
+      lesson.course.enrollments && lesson.course.enrollments.length > 0
+        ? lesson.course.enrollments[0]
+        : null;
+
+    // Access is valid if previewable, or enrolled with a live (non-revoked,
+    // non-expired) access window.
+    const nowMs = Date.now();
+    const notRevoked = !enrollment?.revokedAt;
+    const notExpired =
+      !enrollment?.accessUntil ||
+      new Date(enrollment.accessUntil).getTime() > nowMs;
+    const hasAccess =
+      lesson.isPreview || (!!enrollment && notRevoked && notExpired);
+    if (!hasAccess) throw new NotFoundException("Access denied");
+
+    const offlineValidityDays =
+      (lesson.course as any).offlineValidityDays ?? 30;
+    const accessUntilMs = enrollment?.accessUntil
+      ? new Date(enrollment.accessUntil).getTime()
+      : null;
+
+    // The offline token lives for the offline-validity window, but never longer
+    // than the learner's remaining access window. This is the YouTube-style
+    // "reconnect within N days" rule, capped by the purchased access period.
+    const offlineWindowSec = offlineValidityDays * 24 * 60 * 60;
+    let ttlSec = offlineWindowSec;
+    if (accessUntilMs) {
+      const accessRemainingSec = Math.max(
+        60,
+        Math.floor((accessUntilMs - nowMs) / 1000),
+      );
+      ttlSec = Math.min(ttlSec, accessRemainingSec);
+    }
+
+    const aesKey = crypto.randomBytes(32).toString("hex"); // 256-bit key
+    const expiresAt = Math.floor(nowMs / 1000) + ttlSec;
+    const token = this.jwtService.sign(
+      { sub: userId, lessonId, aesKey, purpose: "download" },
+      { expiresIn: ttlSec },
+    );
+    return {
+      token,
+      aesKey,
+      expiresAt,
+      accessUntil: accessUntilMs,
+      offlineValidityDays,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 3: DRM license token
+  // Returns a short-lived (2-hour) JWT used as the Authorization header when
+  // the mobile player requests a Widevine / FairPlay license.
+  // In production: replace this with calls to a real DRM provider
+  // (e.g. Ezdrm, Axinom, or AWS MediaConvert + Speke).
+  // ---------------------------------------------------------------------------
+  async generateDrmToken(
+    userId: string,
+    lessonId: string,
+  ): Promise<{ drmToken: string; licenseUrl: string; expiresAt: number }> {
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      include: { course: { include: { enrollments: { where: { userId } } } } },
+    });
+    if (!lesson) throw new NotFoundException("Lesson not found");
+    const hasAccess =
+      lesson.isPreview ||
+      (lesson.course.enrollments && lesson.course.enrollments.length > 0);
+    if (!hasAccess) throw new NotFoundException("Access denied");
+
+    const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
+    const drmToken = this.jwtService.sign(
+      { sub: userId, lessonId, purpose: "drm" },
+      { expiresIn: "2h" },
+    );
+    const apiBase = process.env.PUBLIC_API_URL || "http://localhost:3001";
+    const licenseUrl = apiBase + "/media/drm-license/" + lessonId;
+    return { drmToken, licenseUrl, expiresAt };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 3: DRM license proxy
+  // Validates the token and proxies the request to the actual DRM server.
+  // Replace LICENSE_SERVER_URL with your Widevine / FairPlay license URL.
+  // ---------------------------------------------------------------------------
+  async verifyDrmToken(
+    lessonId: string,
+    token: string,
+  ): Promise<{ valid: boolean; userId?: string }> {
+    try {
+      const payload = this.jwtService.verify(token) as any;
+      if (payload.lessonId !== lessonId || payload.purpose !== "drm")
+        return { valid: false };
+      return { valid: true, userId: payload.sub };
+    } catch {
+      return { valid: false };
+    }
+  }
+
   probeDurationSec(filePath: string): number | null {
     try {
       const res = spawnSync(
         "ffprobe",
         [
-          "-v",
-          "error",
-          "-show_entries",
-          "format=duration",
-          "-of",
-          "default=noprint_wrappers=1:nokey=1",
+          "-v", "error",
+          "-show_entries", "format=duration",
+          "-of", "default=noprint_wrappers=1:nokey=1",
           filePath,
         ],
-        { encoding: "utf8", timeout: 15000 },
+        { timeout: 15000 },
       );
-      if (res.status !== 0) {
-        this.logger.warn(`ffprobe failed for ${filePath}: ${res.stderr}`);
-        return null;
-      }
-      const seconds = parseFloat((res.stdout || "").trim());
-      if (!isFinite(seconds) || seconds <= 0) return null;
-      return Math.round(seconds);
-    } catch (err) {
-      this.logger.warn(`ffprobe error: ${(err as Error).message}`);
+      const out = res.stdout?.toString().trim();
+      const n = parseFloat(out);
+      return isFinite(n) && n > 0 ? Math.round(n) : null;
+    } catch {
       return null;
     }
   }
 
-  // Transcode a video to a web-friendly H.264/AAC MP4 at a capped height
-  // (default 720p, configurable via VIDEO_MAX_HEIGHT). Smaller file = faster
-  // upload/download and smooth streaming with no visible quality loss, plus
-  // guaranteed cross-platform playback. Uses async spawn so the event loop is
-  // never blocked. Resolves to null on failure (caller keeps the original).
-  transcodeToMp4(
+  async transcodeToMp4(
     inputPath: string,
   ): Promise<{ path: string; filename: string; size: number } | null> {
-    const maxHeight = Number(process.env.VIDEO_MAX_HEIGHT || 720);
-    const crf = Number(process.env.VIDEO_CRF || 23);
-    const preset = process.env.VIDEO_PRESET || "veryfast";
-    const dir = dirname(inputPath);
-    const base = basename(inputPath, extname(inputPath));
-    const outName = base + "-h264.mp4";
-    const outPath = join(dir, outName);
-    const args = [
-      "-v",
-      "error",
-      "-i",
-      inputPath,
-      // Cap height to maxHeight, keep aspect ratio, force even width (-2).
-      // The min() never upscales smaller sources.
-      "-vf",
-      `scale=-2:'min(ih,${maxHeight})'`,
-      "-c:v",
-      "libx264",
-      "-preset",
-      preset,
-      "-crf",
-      String(crf),
-      "-c:a",
-      "aac",
-      "-b:a",
-      "128k",
-      "-movflags",
-      "+faststart",
-      "-y",
-      outPath,
-    ];
+    const maxH = parseInt(process.env.VIDEO_MAX_HEIGHT || "720", 10);
+    const outName = basename(inputPath, extname(inputPath)) + "-tc.mp4";
+    const outPath = join(dirname(inputPath), outName);
     return new Promise((resolve) => {
-      try {
-        const proc = spawn("ffmpeg", args, { stdio: "ignore" });
-        proc.on("error", (err) => {
-          this.logger.warn(`ffmpeg transcode error: ${err.message}`);
-          resolve(null);
-        });
-        proc.on("close", (code) => {
-          if (code !== 0) {
-            this.logger.warn(`ffmpeg transcode exited with code ${code}`);
-            resolve(null);
-            return;
-          }
-          try {
-            const size = statSync(outPath).size;
-            resolve({ path: outPath, filename: outName, size });
-          } catch (e) {
-            this.logger.warn(
-              `transcode output missing: ${(e as Error).message}`,
-            );
-            resolve(null);
-          }
-        });
-      } catch (err) {
-        this.logger.warn(`ffmpeg spawn failed: ${(err as Error).message}`);
-        resolve(null);
-      }
+      const ff = spawn("ffmpeg", [
+        "-i", inputPath,
+        "-vf", "scale=trunc(oh*a/2)*2:min(ih\," + maxH + ")",
+        "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        "-y", outPath,
+      ]);
+      ff.on("close", (code) => {
+        if (code !== 0) { resolve(null); return; }
+        try {
+          const size = statSync(outPath).size;
+          resolve({ path: outPath, filename: outName, size });
+        } catch { resolve(null); }
+      });
+      ff.on("error", () => resolve(null));
     });
   }
 
-  // Compress an audio upload to a small AAC/.m4a file (default ~96 kbps, mono),
-  // configurable via AUDIO_BITRATE / AUDIO_CHANNELS. Large WAV/MP3 lecture and
-  // audiobook sources shrink dramatically with no audible loss for speech =
-  // faster upload/download and cheaper storage, mirroring the video transcode.
-  // Async spawn keeps the event loop free. Resolves to null on failure (caller
-  // keeps the original file).
-  transcodeAudio(
+  async transcodeAudio(
     inputPath: string,
   ): Promise<{ path: string; filename: string; size: number } | null> {
-    const bitrate = process.env.AUDIO_BITRATE || "96k";
-    const channels = Number(process.env.AUDIO_CHANNELS || 1);
-    const dir = dirname(inputPath);
-    const base = basename(inputPath, extname(inputPath));
-    const outName = base + "-aac.m4a";
-    const outPath = join(dir, outName);
-    const args = [
-      "-v",
-      "error",
-      "-i",
-      inputPath,
-      "-vn",
-      "-c:a",
-      "aac",
-      "-b:a",
-      bitrate,
-      "-ac",
-      String(channels),
-      "-ar",
-      "44100",
-      "-movflags",
-      "+faststart",
-      "-y",
-      outPath,
-    ];
+    const outName = basename(inputPath, extname(inputPath)) + "-tc.m4a";
+    const outPath = join(dirname(inputPath), outName);
     return new Promise((resolve) => {
-      try {
-        const proc = spawn("ffmpeg", args, { stdio: "ignore" });
-        proc.on("error", (err) => {
-          this.logger.warn(`ffmpeg audio transcode error: ${err.message}`);
-          resolve(null);
-        });
-        proc.on("close", (code) => {
-          if (code !== 0) {
-            this.logger.warn(`ffmpeg audio transcode exited with code ${code}`);
-            resolve(null);
-            return;
-          }
-          try {
-            const size = statSync(outPath).size;
-            resolve({ path: outPath, filename: outName, size });
-          } catch (e) {
-            this.logger.warn(
-              `audio transcode output missing: ${(e as Error).message}`,
-            );
-            resolve(null);
-          }
-        });
-      } catch (err) {
-        this.logger.warn(
-          `ffmpeg audio spawn failed: ${(err as Error).message}`,
-        );
-        resolve(null);
-      }
+      const ff = spawn("ffmpeg", [
+        "-i", inputPath,
+        "-c:a", "aac", "-b:a", "96k", "-ac", "1",
+        "-y", outPath,
+      ]);
+      ff.on("close", (code) => {
+        if (code !== 0) { resolve(null); return; }
+        try {
+          const size = statSync(outPath).size;
+          resolve({ path: outPath, filename: outName, size });
+        } catch { resolve(null); }
+      });
+      ff.on("error", () => resolve(null));
     });
   }
 }

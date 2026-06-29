@@ -26,4 +26,14 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   communityId?: string;
+
+  // Optional global coupon code applied at checkout.
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
+
+  // Optional course access offer/tier id this purchase is for.
+  @IsOptional()
+  @IsString()
+  offerId?: string;
 }

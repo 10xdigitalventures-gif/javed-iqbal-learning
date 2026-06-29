@@ -1,5 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import * as Crypto from "expo-crypto";
+import * as Device from "expo-device";
+import { Platform } from "react-native";
 
 export const API_URL =
   (Constants.expoConfig?.extra as any)?.apiUrl || "http://10.0.2.2:4000/api";
@@ -19,6 +22,38 @@ export async function setToken(t: string) {
 export async function clearToken() {
   token = null;
   await AsyncStorage.removeItem("token");
+}
+
+// Stable per-install device id used for the concurrent-device limit. Generated
+// once and persisted; survives logout so re-login on the same phone reuses it.
+export async function getDeviceInfo(): Promise<{
+  deviceId: string;
+  deviceLabel: string;
+  devicePlatform: string;
+}> {
+  let id = await AsyncStorage.getItem("device_id");
+  if (!id) {
+    id =
+      (Crypto as any).randomUUID?.() ??
+      String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+    await AsyncStorage.setItem("device_id", id);
+  }
+  const label =
+    [Device.brand, Device.modelName].filter(Boolean).join(" ") ||
+    Device.deviceName ||
+    (Platform.OS === "ios" ? "iPhone" : "Android device");
+  return {
+    deviceId: id,
+    deviceLabel: label,
+    devicePlatform: Platform.OS,
+  };
+}
+
+// Optional callback invoked when the server signs this device out (401 with a
+// device-revoked message). The auth layer wires this to force a logout.
+let onSignedOut: (() => void) | null = null;
+export function setOnSignedOut(cb: (() => void) | null) {
+  onSignedOut = cb;
 }
 
 export async function api<T = any>(
@@ -42,7 +77,17 @@ export async function api<T = any>(
         ? data.message.join(", ")
         : data.message || message;
     } catch {}
-    throw new Error(message);
+    // Device signed out remotely / kicked by the concurrent-device limit.
+    if (
+      res.status === 401 &&
+      /signed out|device/i.test(message) &&
+      onSignedOut
+    ) {
+      onSignedOut();
+    }
+    const err: any = new Error(message);
+    err.status = res.status;
+    throw err;
   }
   if (res.status === 204) return undefined as T;
   return res.json();

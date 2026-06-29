@@ -104,6 +104,12 @@ model User {
   // Expo push token for mobile notifications (null when not registered)
   pushToken  String?
 
+  // Concurrent device limit: how many devices may stay logged in at once.
+  // When a new device logs in beyond this limit, the oldest device is signed
+  // out (Netflix/YouTube style). Admin-configurable per user.
+  maxDevices Int      @default(2)
+  devices    UserDevice[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -153,6 +159,7 @@ model User {
   // Gamification (Phase 10): points, streaks, badges
   gameStat              UserGameStat?
   badges                UserBadge[]
+  courseComments        CourseComment[]
 
   // Plans explicitly assigned to this consultant (many-to-many). Global plans
   // (Package.isGlobal = true) are available to every consultant and are not
@@ -679,6 +686,11 @@ model Order {
   status   OrderStatus         @default(PENDING)
   amount   Float
   currency String              @default("PKR")
+  // Coupon applied at checkout (global coupons). discount is in currency units.
+  couponCode String?
+  discount   Float   @default(0)
+  // Optional course access offer/tier this order was purchased through.
+  offerId    String?
 
   bookId   String?
   bundleId String?
@@ -879,6 +891,12 @@ model CommunityPostLike {
 // Unlock rule for a module or lesson:
 //   SINGLE = unlock as soon as the previous item is completed by the learner.
 //   BOTH   = previous item completed AND a time delay has elapsed since then.
+enum UnlockPolicy {
+  OPEN
+  SEQUENTIAL
+  DRIP
+}
+
 enum ModuleLockMode {
   SINGLE
   BOTH
@@ -896,13 +914,21 @@ model CourseModule {
   // Hours to wait after the previous module is completed before this one opens.
   // Only enforced when lockMode = BOTH.
   unlockDelayHours Int            @default(0)
+  // Draft vs Published. Draft modules are hidden from learners.
+  isPublished      Boolean        @default(true)
+  // Optional parent module id. When set this module is a SUB-MODULE nested
+  // under another module. null = top-level module.
+  parentId         String?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  lessons Lesson[]
+  course   Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  parent   CourseModule?  @relation("ModuleTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children CourseModule[] @relation("ModuleTree")
+  lessons  Lesson[]
 
   @@unique([courseId, index])
+  @@index([parentId])
 }
 
 model Course {
@@ -914,6 +940,18 @@ model Course {
   price       Float   @default(0)
   currency    String  @default("PKR")
   isPublished Boolean @default(false)
+  // Default access duration (days) granted on enrollment/purchase.
+  // null = lifetime access.
+  accessDurationDays Int?
+  // How lessons unlock after purchase:
+  //   OPEN       = everything unlocked immediately
+  //   SEQUENTIAL = one-by-one (complete previous to open next) [default]
+  //   DRIP       = sequential + time delays (per-module/lesson lockMode = BOTH)
+  unlockPolicy UnlockPolicy @default(SEQUENTIAL)
+  // YouTube-style offline re-validation window (days). A downloaded video must
+  // reconnect to the server within this window or it stops playing until the
+  // device is online again.
+  offlineValidityDays Int @default(30)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -925,6 +963,10 @@ model Course {
   certificates Certificate[]
   orders      Order[]
   reviews     CourseReview[]
+  offers       CourseOffer[]
+  comments     CourseComment[]
+  badges       CourseBadge[]
+  liveSessions LiveSession[]
 }
 
 model Lesson {
@@ -943,6 +985,8 @@ model Lesson {
   source       LessonSource @default(UPLOAD)
   durationSec Int?
   isPreview  Boolean    @default(false)
+  // Draft vs Published. Draft lessons are hidden from learners.
+  isPublished Boolean   @default(true)
 
   // Optional grouping into a CourseModule (section). Null = ungrouped (legacy).
   moduleId   String?
@@ -971,6 +1015,11 @@ model Enrollment {
   lessonsComplete Int      @default(0)
   startedAt       DateTime @default(now())
   completedAt     DateTime?
+  // Access window. null = lifetime access. When `accessUntil` is in the past
+  // (or `revokedAt` is set) the learner loses access and the mobile app wipes
+  // any downloaded videos for this course.
+  accessUntil     DateTime?
+  revokedAt       DateTime?
 
   user   User   @relation(fields: [userId], references: [id])
   course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
@@ -1073,6 +1122,12 @@ model Assignment {
   // JSON-encoded array of instructor reference files: [{ key, name, size }].
   // Shown on the Attachments tab of the assignment.
   attachments String?
+  // Optional cover image (URL or storage key). Recommended 1280x720.
+  thumbnailUrl String?
+  // Graded assignments get a score; ungraded ones are completion-only.
+  graded      Boolean  @default(true)
+  // Rich-text message shown to learners after they complete the assignment.
+  completionMessage String?
   dueAt       DateTime?
 
   course      Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
@@ -1207,4 +1262,123 @@ model UserBadge {
 
   @@unique([userId, badgeKey])
   @@index([userId])
+}
+
+
+// A logged-in device/session for a user. Used to enforce the concurrent device
+// limit and to let users (and admins) see + sign out devices remotely.
+model UserDevice {
+  id         String    @id @default(cuid())
+  userId     String
+  // Stable client-generated id (stored on the device). Identifies the
+  // physical device across logins so re-login on the same phone reuses the row.
+  deviceId   String
+  label      String?
+  platform   String?
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  // When set, the device has been signed out remotely / kicked by the limit.
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+}
+
+
+// ===========================================================================
+// Course monetization, engagement & live features
+// ===========================================================================
+
+// A purchasable ACCESS OFFER (pricing tier) for one course. The same course can
+// be sold at several different prices, each with its own name and access
+// window, e.g. "1 Month - 1500", "Lifetime - 5000". Buying an offer grants the
+// learner enrollment access for accessDurationDays (null = lifetime).
+model CourseOffer {
+  id                 String   @id @default(cuid())
+  courseId           String
+  name               String
+  description        String?
+  price              Float    @default(0)
+  currency           String   @default("PKR")
+  // null = lifetime access; otherwise overrides the course default duration.
+  accessDurationDays Int?
+  isActive           Boolean  @default(true)
+  index              Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+}
+
+// A GLOBAL discount coupon. Works across every checkout (course, book, bundle,
+// plan, community). discountType = PERCENT (amount = 0-100) or FIXED (amount =
+// currency units).
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  discountType   String    @default("PERCENT")
+  amount         Float     @default(0)
+  isActive       Boolean   @default(true)
+  expiresAt      DateTime?
+  maxRedemptions Int?
+  timesRedeemed  Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// A learner comment / discussion entry at the course level (optionally pinned
+// to a lesson). parentId enables one level of threaded replies.
+model CourseComment {
+  id        String   @id @default(cuid())
+  courseId  String
+  userId    String
+  lessonId  String?
+  body      String
+  parentId  String?
+  createdAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+}
+
+// A badge awarded for a course. type = WELCOME (on enrollment) or COMPLETION
+// (on finishing the course).
+model CourseBadge {
+  id        String   @id @default(cuid())
+  courseId  String
+  type      String   @default("WELCOME")
+  name      String
+  imageUrl  String?
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+}
+
+// A scheduled live class/webinar for a course. status = SCHEDULED | LIVE |
+// ENDED | CANCELLED. joinUrl is the meeting link (Zoom/Meet/etc.).
+model LiveSession {
+  id          String   @id @default(cuid())
+  courseId    String
+  title       String
+  description String?
+  scheduledAt DateTime
+  durationMin Int      @default(60)
+  joinUrl     String?
+  status      String   @default("SCHEDULED")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
 }

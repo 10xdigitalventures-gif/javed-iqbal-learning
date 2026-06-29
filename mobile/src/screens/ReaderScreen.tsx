@@ -25,7 +25,7 @@ import {
 import { trackEvent } from "../activity";
 import { useContentProtection } from "../protect";
 
-type Chapter = { id: string; index: number; title: string };
+type Chapter = { id: string; index: number; title: string; titleUrdu?: string; isFree?: boolean };
 type ThemeName = "light" | "sepia" | "dark";
 type AiMsg = { role: "user" | "assistant"; content: string };
 type SavedTab = "bookmarks" | "notes" | "highlights";
@@ -124,6 +124,9 @@ export default function ReaderScreen() {
   const [query, setQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
+  const [lang, setLang] = useState<"en" | "ur">("en");
+  const [hasUrdu, setHasUrdu] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [highlighted, setHighlighted] = useState<Record<number, boolean>>({});
@@ -206,7 +209,8 @@ export default function ReaderScreen() {
   }
 
   const fetchChapter = useCallback(
-    async (chapterId: string | null, chapterIndex: number) => {
+    async (chapterId: string | null, chapterIndex: number, langOverride?: string) => {
+      const activeLang = langOverride ?? lang;
       if (preview) {
         const data = await api("/books/" + bookId + "/preview").catch(
           () => null,
@@ -217,9 +221,16 @@ export default function ReaderScreen() {
         );
         return;
       }
+      setLocked(false);
       try {
-        const qs = chapterId ? "?chapterId=" + chapterId : "";
+        let qs = chapterId ? "?chapterId=" + chapterId : "";
+        if (activeLang === "ur") qs += (qs ? "&" : "?") + "lang=ur";
         const data: any = await api("/library/content/" + bookId + qs);
+        if (data.locked) {
+          setLocked(true);
+          setContent("");
+          return;
+        }
         const text = data.content || "";
         setContent(text);
         setOffline(false);
@@ -237,7 +248,7 @@ export default function ReaderScreen() {
         }
       }
     },
-    [bookId, preview, secureKey],
+    [bookId, preview, secureKey, lang],
   );
 
   const boot = useCallback(async () => {
@@ -252,6 +263,7 @@ export default function ReaderScreen() {
         list = (data.chapters || []) as Chapter[];
         setChapters(list);
         setContent(data.content || "");
+        if (data.hasUrdu) setHasUrdu(true);
         if (data.content)
           saveProtectedContent(secureKey(data.chapterId), data.content).catch(
             () => {},
@@ -470,6 +482,21 @@ export default function ReaderScreen() {
           {title}
         </Text>
         <View style={s.topActions}>
+          {hasUrdu && (
+            <TouchableOpacity
+              onPress={() => {
+                const next: "en" | "ur" = lang === "en" ? "ur" : "en";
+                setLang(next);
+                fetchChapter(chapters[idx]?.id ?? null, idx, next);
+              }}
+              hitSlop={6}
+              style={[s.topBtn, s.langBtn, lang === "ur" ? s.langBtnActive : null]}
+            >
+              <Text style={[s.langBtnText, lang === "ur" ? s.langBtnTextActive : { color: th.muted }]}>
+                {lang === "ur" ? "EN" : "UR"}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={() => setShowSearch((v) => !v)}
             hitSlop={6}
@@ -525,7 +552,15 @@ export default function ReaderScreen() {
         style={s.reader}
         contentContainerStyle={s.readerContent}
       >
-        {visible.length ? (
+        {locked ? (
+          <View style={s.lockedBox}>
+            <Ionicons name="lock-closed" size={40} color={colors.brand} />
+            <Text style={[s.lockedTitle, { color: th.text }]}>Chapter Locked</Text>
+            <Text style={[s.lockedSub, { color: th.muted }]}>
+              Purchase this book to read this chapter.
+            </Text>
+          </View>
+        ) : visible.length ? (
           visible.map((p, i) => (
             <TouchableOpacity
               key={i}
@@ -541,6 +576,8 @@ export default function ReaderScreen() {
                     lineHeight: Math.round(fontSize * lineMult),
                     color: th.text,
                     fontFamily: serif ? "serif" : undefined,
+                    textAlign: lang === "ur" ? "right" : "left",
+                    writingDirection: lang === "ur" ? "rtl" : "ltr",
                   },
                   highlighted[i]
                     ? { backgroundColor: th.hl, borderRadius: 4 }
@@ -556,9 +593,11 @@ export default function ReaderScreen() {
             No matches in this chapter.
           </Text>
         )}
-        <Text style={[s.tip, { color: th.muted }]}>
-          Tip: long-press a paragraph to highlight it.
-        </Text>
+        {!locked && (
+          <Text style={[s.tip, { color: th.muted }]}>
+            Tip: long-press a paragraph to highlight it.
+          </Text>
+        )}
       </ScrollView>
 
       <View style={[s.navBar, { borderTopColor: th.border }]}>
@@ -632,12 +671,20 @@ export default function ReaderScreen() {
                       { color: th.text },
                       i === idx ? s.chapterActive : null,
                     ]}
+                    numberOfLines={2}
                   >
-                    {i + 1}. {c.title}
+                    {i + 1}. {lang === "ur" && c.titleUrdu ? c.titleUrdu : c.title}
                   </Text>
-                  {i === idx ? (
-                    <Ionicons name="book" size={16} color={colors.brand} />
-                  ) : null}
+                  <View style={s.chapterRowRight}>
+                    {c.isFree ? (
+                      <View style={s.freeBadge}>
+                        <Text style={s.freeBadgeText}>Free</Text>
+                      </View>
+                    ) : null}
+                    {i === idx ? (
+                      <Ionicons name="book" size={16} color={colors.brand} />
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -1233,4 +1280,31 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   aiSendOff: { opacity: 0.4 },
+  langBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginRight: 4,
+  },
+  langBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  langBtnText: { fontSize: 11, fontWeight: "800", color: colors.muted },
+  langBtnTextActive: { color: "#fff" },
+  lockedBox: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 80,
+  },
+  lockedTitle: { fontSize: 18, fontWeight: "800", marginTop: 16, color: colors.text },
+  lockedSub: { fontSize: 14, color: colors.muted, marginTop: 8, textAlign: "center" },
+  chapterRowRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  freeBadge: {
+    backgroundColor: "#dcfce7",
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  freeBadgeText: { fontSize: 10, fontWeight: "800", color: "#16a34a" },
 });
