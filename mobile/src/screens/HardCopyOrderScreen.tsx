@@ -1,9 +1,47 @@
 import React, { useState } from "react";
-import { Alert, ScrollView, Text, View, StyleSheet } from "react-native";
+import {
+  Alert,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+  StyleSheet,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { api } from "../api";
 import { Button, Field } from "../components";
 import { colors, radius, spacing } from "../theme";
+
+// Four ways to pay for a printed copy. The first three reuse the gateways that
+// already exist in the app; "Cash on Delivery" is the new manual option.
+type PayMethod = { key: string; label: string; hint?: string; icon: any };
+const PAY_METHODS: PayMethod[] = [
+  {
+    key: "payfast",
+    label: "PayFast",
+    hint: "Card, wallet & bank (PKR)",
+    icon: "card-outline",
+  },
+  {
+    key: "whop",
+    label: "Whop",
+    hint: "Card, BNPL & Crypto (USD)",
+    icon: "globe-outline",
+  },
+  {
+    key: "bank_transfer",
+    label: "Bank Transfer",
+    hint: "Pay to our account, share the receipt",
+    icon: "business-outline",
+  },
+  {
+    key: "cod",
+    label: "Cash on Delivery",
+    hint: "Pay in cash when the book arrives",
+    icon: "cash-outline",
+  },
+];
 
 export default function HardCopyOrderScreen() {
   const nav = useNavigation<any>();
@@ -16,6 +54,7 @@ export default function HardCopyOrderScreen() {
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [method, setMethod] = useState("cod");
   const [busy, setBusy] = useState(false);
 
   async function submit() {
@@ -34,11 +73,19 @@ export default function HardCopyOrderScreen() {
           address: address.trim(),
           city: city.trim(),
           quantity: Math.max(1, parseInt(quantity, 10) || 1),
+          paymentMethod: method,
         },
       });
+      const picked = PAY_METHODS.find((m) => m.key === method);
+      const payNote =
+        method === "cod"
+          ? "Please keep the cash ready for delivery."
+          : "Our team will contact you to confirm payment via " +
+            (picked?.label || "your selected method") +
+            ".";
       Alert.alert(
         "Order placed",
-        "Your hard copy order has been received. We will contact you to confirm delivery.",
+        "Your hard copy order has been received. " + payNote,
         [{ text: "OK", onPress: () => nav.goBack() }],
       );
     } catch (e: any) {
@@ -57,6 +104,7 @@ export default function HardCopyOrderScreen() {
         </View>
       ) : null}
 
+      <Text style={s.stepLabel}>1. Your delivery details</Text>
       <Field
         label="Full name"
         value={name}
@@ -90,15 +138,37 @@ export default function HardCopyOrderScreen() {
         keyboardType="number-pad"
       />
 
-      <View style={s.note}>
-        <Text style={s.noteText}>
-          Payment for hard copies is collected on delivery or confirmed by our
-          team after you place the order.
-        </Text>
-      </View>
+      <Text style={s.stepLabel}>2. Payment method</Text>
+      {PAY_METHODS.map((m) => {
+        const selected = method === m.key;
+        return (
+          <TouchableOpacity
+            key={m.key}
+            style={[s.method, selected ? s.methodActive : null]}
+            activeOpacity={0.85}
+            onPress={() => setMethod(m.key)}
+          >
+            <Ionicons
+              name={selected ? "radio-button-on" : "radio-button-off"}
+              size={20}
+              color={selected ? colors.brand : colors.muted}
+            />
+            <Ionicons
+              name={m.icon}
+              size={18}
+              color={colors.brandDark}
+              style={s.methodIcon}
+            />
+            <View style={s.methodTextWrap}>
+              <Text style={s.methodLabel}>{m.label}</Text>
+              {m.hint ? <Text style={s.methodHint}>{m.hint}</Text> : null}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
 
       <Button
-        title={busy ? "Placing order…" : "Place order"}
+        title={busy ? "Placing order\u2026" : "Place order"}
         onPress={submit}
         disabled={busy}
       />
@@ -122,13 +192,29 @@ const s = StyleSheet.create({
     color: colors.text,
     marginTop: 2,
   },
-  note: {
+  stepLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  method: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.card,
-    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 12,
-    marginBottom: 16,
+    borderRadius: radius.md,
+    padding: 14,
+    marginBottom: 10,
   },
-  noteText: { fontSize: 12, color: colors.muted, lineHeight: 18 },
+  methodActive: {
+    borderColor: colors.brand,
+    backgroundColor: colors.brandLight,
+  },
+  methodIcon: { marginLeft: 10 },
+  methodTextWrap: { marginLeft: 10, flex: 1 },
+  methodLabel: { fontSize: 14, fontWeight: "700", color: colors.text },
+  methodHint: { fontSize: 12, color: colors.muted, marginTop: 2 },
 });

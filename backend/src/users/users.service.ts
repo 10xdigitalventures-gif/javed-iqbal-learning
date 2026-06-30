@@ -26,6 +26,7 @@ const PUBLIC_SELECT = {
   bio: true,
   avatarUrl: true,
   maxDevices: true,
+  tags: true,
   createdAt: true,
 };
 
@@ -137,6 +138,17 @@ export class UsersService {
       data: { isActive },
       select: PUBLIC_SELECT,
     });
+  }
+
+  // Distinct list of segmentation tags currently in use (for admin pickers).
+  async listTags(): Promise<string[]> {
+    const rows = await this.prisma.user.findMany({
+      where: { NOT: { tags: { isEmpty: true } } },
+      select: { tags: true },
+    });
+    const set = new Set<string>();
+    for (const r of rows) for (const t of r.tags) set.add(t);
+    return Array.from(set).sort();
   }
 
   // Consultants the public/clients can browse (active only).

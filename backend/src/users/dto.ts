@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
@@ -80,4 +81,9 @@ export class UpdateUserDto {
   @IsInt()
   @Min(1)
   maxDevices?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
 }

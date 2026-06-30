@@ -204,6 +204,17 @@ export default function CoursesAdminPage() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {courses.map((c) => (
               <Card key={c.id}>
+                {c.coverUrl ? (
+                  <img
+                    src={c.coverUrl}
+                    alt={c.title}
+                    className="mb-3 h-36 w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="mb-3 flex h-36 w-full items-center justify-center rounded-lg bg-brand/10">
+                    <BookOpen className="h-8 w-8 text-brand" />
+                  </div>
+                )}
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <h3 className="font-bold text-slate-950">{c.title}</h3>
@@ -218,7 +229,7 @@ export default function CoursesAdminPage() {
                         {c._count?.lessons ?? 0} lessons
                       </Badge>
                       <Badge color="amber">
-                        {c._count?.enrollments ?? 0} students
+                        {c._count?.enrollments ?? 0} members
                       </Badge>
                     </div>
                   </div>

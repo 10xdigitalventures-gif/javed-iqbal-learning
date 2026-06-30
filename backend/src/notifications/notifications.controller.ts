@@ -8,8 +8,11 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { NotificationsService } from "./notifications.service";
-import { UpdatePreferenceDto } from "./dto";
+import { UpdatePreferenceDto, BroadcastDto } from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
+import { Role } from "@prisma/client";
 import { CurrentUser, AuthUser } from "../auth/current-user.decorator";
 
 @Controller("notifications")
@@ -45,6 +48,22 @@ export class NotificationsController {
   @Post("test")
   test(@CurrentUser() user: AuthUser) {
     return this.service.sendTest(user.userId);
+  }
+
+  // Admin: how many users a broadcast segment would reach.
+  @Post("broadcast/preview")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  broadcastPreview(@Body() dto: BroadcastDto) {
+    return this.service.previewBroadcast(dto);
+  }
+
+  // Admin: send a push + in-app notification to a segment of users.
+  @Post("broadcast")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  broadcast(@Body() dto: BroadcastDto) {
+    return this.service.broadcast(dto);
   }
 
   @Post(":id/read")

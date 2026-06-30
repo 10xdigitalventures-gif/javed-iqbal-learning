@@ -125,6 +125,83 @@ export class NotificationsService {
     return notif;
   }
 
+  // Resolve the set of user ids that match a broadcast segment.
+  private async resolveRecipientIds(opts: {
+    segment: string;
+    tag?: string;
+    since?: string;
+    until?: string;
+  }): Promise<string[]> {
+    if (opts.segment === "tag") {
+      const tag = (opts.tag || "").trim();
+      if (!tag) return [];
+      const users = await this.prisma.user.findMany({
+        where: { isActive: true, tags: { has: tag } },
+        select: { id: true },
+      });
+      return users.map((u) => u.id);
+    }
+    if (opts.segment === "purchase") {
+      const createdAt: any = {};
+      if (opts.since) createdAt.gte = new Date(opts.since);
+      if (opts.until) createdAt.lte = new Date(opts.until);
+      const purchases = await this.prisma.purchase.findMany({
+        where: opts.since || opts.until ? { createdAt } : {},
+        select: { clientId: true },
+      });
+      const ids = Array.from(new Set(purchases.map((p) => p.clientId)));
+      if (ids.length === 0) return [];
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: ids }, isActive: true },
+        select: { id: true },
+      });
+      return users.map((u) => u.id);
+    }
+    // default: "all" active users
+    const users = await this.prisma.user.findMany({
+      where: { isActive: true },
+      select: { id: true },
+    });
+    return users.map((u) => u.id);
+  }
+
+  // How many users a segment would reach (no notification is sent).
+  async previewBroadcast(opts: {
+    segment: string;
+    tag?: string;
+    since?: string;
+    until?: string;
+  }) {
+    const ids = await this.resolveRecipientIds(opts);
+    return { count: ids.length };
+  }
+
+  // Send an admin push/in-app notification to every user in a segment.
+  async broadcast(opts: {
+    title: string;
+    body?: string;
+    segment: string;
+    tag?: string;
+    since?: string;
+    until?: string;
+  }) {
+    const ids = await this.resolveRecipientIds(opts);
+    let sent = 0;
+    for (const userId of ids) {
+      try {
+        await this.create(userId, {
+          type: "announcement",
+          title: opts.title,
+          body: opts.body,
+        });
+        sent++;
+      } catch {
+        // best-effort per recipient
+      }
+    }
+    return { recipients: ids.length, sent };
+  }
+
   // Send a test notification to the user across all of their enabled channels
   // so they can verify their configuration.
   async sendTest(userId: string) {

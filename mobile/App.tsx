@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
@@ -115,6 +115,12 @@ function Tabs() {
 
 function Root() {
   const { user, loading } = useAuth();
+  // Keep the branded loading screen up for at least 3 seconds on launch.
+  const [minSplash, setMinSplash] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setMinSplash(false), 3000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Flush any queued offline activity whenever the app comes to the foreground.
   useEffect(() => {
@@ -126,7 +132,7 @@ function Root() {
     return () => sub.remove();
   }, [user]);
 
-  if (loading) return <Loading />;
+  if (loading || minSplash) return <Loading />;
   return (
     <Stack.Navigator screenOptions={brandHeader}>
       {user ? (

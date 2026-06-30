@@ -36,6 +36,7 @@ const nav = {
     { href: "/admin/clients", label: "Clients", icon: Users },
     { href: "/admin/packages", label: "Packages", icon: Package },
     { href: "/admin/payments", label: "Payments", icon: CreditCard },
+    { href: "/admin/notifications", label: "Push Notifications", icon: Bell },
     { href: "/admin/communities", label: "Communities", icon: MessageSquare },
     { href: "/admin/ebooks", label: "E-Books", icon: BookOpen },
     { href: "/admin/courses", label: "Courses", icon: GraduationCap },
@@ -111,7 +112,10 @@ export function Shell({
             </p>
           </div>
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto pb-16" aria-label="Main navigation">
+        <nav
+          className="flex-1 space-y-1 overflow-y-auto pb-16"
+          aria-label="Main navigation"
+        >
           {nav[role].map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;

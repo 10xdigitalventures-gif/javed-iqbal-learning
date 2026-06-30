@@ -80,7 +80,9 @@ function productName(o: Order) {
 }
 
 export default function AdminPayments() {
-  const [tab, setTab] = useState<"orders" | "transactions" | "bank">("orders");
+  const [tab, setTab] = useState<
+    "orders" | "transactions" | "bank" | "hardcopy"
+  >("orders");
 
   return (
     <div>
@@ -105,14 +107,22 @@ export default function AdminPayments() {
         >
           Bank transfers
         </button>
+        <button
+          className={tabCls(tab === "hardcopy")}
+          onClick={() => setTab("hardcopy")}
+        >
+          Hard Copy
+        </button>
       </div>
 
       {tab === "orders" ? (
         <OrdersTab />
       ) : tab === "transactions" ? (
         <TransactionsTab />
-      ) : (
+      ) : tab === "bank" ? (
         <BankTransfersTab />
+      ) : (
+        <HardCopyTab />
       )}
     </div>
   );
@@ -679,6 +689,164 @@ function BankTransfersTab() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const hcPayLabel: Record<string, string> = {
+  payfast: "PayFast",
+  whop: "Whop",
+  bank_transfer: "Bank Transfer",
+  cod: "Cash on Delivery",
+};
+
+const hcStatusColor: Record<string, any> = {
+  PENDING: "amber",
+  PROCESSING: "blue",
+  SHIPPED: "blue",
+  DELIVERED: "green",
+  CANCELLED: "slate",
+};
+
+const HC_STATUSES = [
+  "PENDING",
+  "PROCESSING",
+  "SHIPPED",
+  "DELIVERED",
+  "CANCELLED",
+];
+
+type HardCopyOrder = {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  city: string;
+  quantity: number;
+  status: string;
+  paymentMethod?: string;
+  createdAt: string;
+  user?: { name: string; email: string };
+  book?: { title: string };
+};
+
+function HardCopyTab() {
+  const [rows, setRows] = useState<HardCopyOrder[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    api<HardCopyOrder[]>("/hardcopy-orders/all")
+      .then(setRows)
+      .catch(() => setRows([]));
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function changeStatus(id: string, status: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await api("/hardcopy-orders/" + id + "/status", {
+        method: "PATCH",
+        body: { status },
+      });
+      load();
+    } catch (e: any) {
+      setError(e?.message || "Could not update the order.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const list = rows ?? [];
+
+  return (
+    <div>
+      {error ? (
+        <p className="mb-3 text-sm font-medium text-red-600">{error}</p>
+      ) : null}
+
+      {!rows ? (
+        <Spinner />
+      ) : (
+        <Card className="overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3">Book</th>
+                <th className="px-4 py-3">Qty</th>
+                <th className="px-4 py-3">Delivery</th>
+                <th className="px-4 py-3">Payment</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((o) => (
+                <tr key={o.id} className="border-b border-slate-100 align-top">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-slate-800">{o.name}</div>
+                    <div className="text-xs text-slate-400">{o.phone}</div>
+                    {o.user?.email ? (
+                      <div className="text-xs text-slate-400">
+                        {o.user.email}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3">{o.book?.title || "\u2014"}</td>
+                  <td className="px-4 py-3">{o.quantity}</td>
+                  <td className="max-w-[220px] px-4 py-3 text-xs text-slate-500">
+                    {o.address}, {o.city}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge color="slate">
+                      {hcPayLabel[o.paymentMethod || "cod"] ||
+                        o.paymentMethod ||
+                        "Cash on Delivery"}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="mb-1">
+                      <Badge color={hcStatusColor[o.status] || "slate"}>
+                        {o.status}
+                      </Badge>
+                    </div>
+                    <select
+                      value={o.status}
+                      disabled={busyId === o.id}
+                      onChange={(e) => changeStatus(o.id, e.target.value)}
+                      className="rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50"
+                    >
+                      {HC_STATUSES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 text-slate-500">
+                    {new Date(o.createdAt).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
+              {list.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-4 py-8 text-center text-slate-400"
+                  >
+                    No hard copy orders yet
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </div>
   );
 }

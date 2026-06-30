@@ -104,6 +104,9 @@ model User {
   // Expo push token for mobile notifications (null when not registered)
   pushToken  String?
 
+  // Admin-assigned segmentation tags (used to target push notifications)
+  tags       String[] @default([])
+
   // Concurrent device limit: how many devices may stay logged in at once.
   // When a new device logs in beyond this limit, the oldest device is signed
   // out (Netflix/YouTube style). Admin-configurable per user.

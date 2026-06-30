@@ -69,6 +69,13 @@ export class UsersController {
     });
   }
 
+  // Distinct segmentation tags in use (for the push-notification composer).
+  @Get("tags")
+  @Roles(Role.ADMIN)
+  tags() {
+    return this.service.listTags();
+  }
+
   @Get(":id")
   @Roles(Role.ADMIN)
   get(@Param("id") id: string) {

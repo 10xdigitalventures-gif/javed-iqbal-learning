@@ -210,6 +210,7 @@ export default function AdminClients() {
                     </Button>
                   </div>
                 </div>
+                <ClientTags u={u} />
               </Card>
             ))}
             {list.length === 0 ? (
@@ -230,6 +231,48 @@ export default function AdminClients() {
           ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+function ClientTags({ u }: { u: User }) {
+  const [value, setValue] = useState((u.tags || []).join(", "));
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    const tags = value
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    setBusy(true);
+    setSaved(false);
+    try {
+      await api("/users/" + u.id, { method: "PATCH", body: { tags } });
+      setSaved(true);
+    } catch {
+      // best-effort
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 flex items-end gap-2 border-t border-slate-100 pt-3">
+      <div className="flex-1">
+        <Input
+          label="Tags (comma separated)"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setSaved(false);
+          }}
+          placeholder="e.g. vip, course-buyer"
+        />
+      </div>
+      <Button variant="outline" onClick={save} disabled={busy}>
+        {busy ? "Saving\u2026" : saved ? "Saved" : "Save tags"}
+      </Button>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import {
   FlatList,
-  ScrollView,
+  Image,
   Text,
   TextInput,
   TouchableOpacity,
@@ -13,31 +13,32 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { api } from "../api";
 import { Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
-import { BookCover, EmptyState, Pill, formatPrice } from "../ui";
+import { BookCover, EmptyState, Pill, ProgressBar } from "../ui";
 
 const arr = (x: any) => (Array.isArray(x) ? x : x?.items || x?.data || []);
+const isAudio = (b: any) =>
+  (b?.category?.name || b?.categoryName || "").toLowerCase().includes("audio");
 
+// "My Library" shows everything the reader has unlocked. Two tabs only:
+//   Courses -> enrolled / purchased courses (cover grid)
+//   Books   -> owned ebooks + audiobooks (added after purchase)
 export default function LibraryScreen() {
   const nav = useNavigation<any>();
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"books" | "bundles">("books");
+  const [tab, setTab] = useState<"courses" | "books">("courses");
+  const [courses, setCourses] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
-  const [bundles, setBundles] = useState<any[]>([]);
-  const [cats, setCats] = useState<any[]>([]);
-  const [cat, setCat] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
-      api("/books").catch(() => []),
-      api("/books/bundles").catch(() => []),
-      api("/categories").catch(() => []),
+      api("/courses/me/enrolled").catch(() => []),
+      api("/library").catch(() => []),
     ])
-      .then(([b, bn, c]) => {
+      .then(([c, b]) => {
+        setCourses(arr(c));
         setBooks(arr(b));
-        setBundles(arr(bn));
-        setCats(arr(c));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -47,14 +48,52 @@ export default function LibraryScreen() {
   if (loading) return <Loading />;
 
   const term = q.trim().toLowerCase();
-  const filteredBooks = books.filter((b: any) => {
-    const catOk = !cat || b.categoryId === cat || b.category?.id === cat;
-    const qOk =
-      !term ||
-      (b.title || "").toLowerCase().includes(term) ||
-      (b.author || "").toLowerCase().includes(term);
-    return catOk && qOk;
-  });
+
+  const ownedBooks = books
+    .map((row: any) => row.book || row)
+    .filter((b: any) => !!b)
+    .filter((b: any) => {
+      if (!term) return true;
+      return (
+        (b.title || "").toLowerCase().includes(term) ||
+        (b.author || "").toLowerCase().includes(term)
+      );
+    });
+
+  const renderCourse = ({ item: e }: { item: any }) => {
+    const course = e.course || e;
+    const cover = course.coverUrl ? { uri: course.coverUrl } : null;
+    const pct = typeof e.percentComplete === "number" ? e.percentComplete : 0;
+    return (
+      <TouchableOpacity
+        style={s.courseCard}
+        activeOpacity={0.85}
+        onPress={() =>
+          nav.navigate("CourseDetail", {
+            idOrSlug: course.slug || course.id,
+            title: course.title,
+          })
+        }
+      >
+        <View style={s.courseCover}>
+          {cover ? (
+            <Image source={cover} style={s.courseCoverImg} />
+          ) : (
+            <View style={s.courseCoverFallback}>
+              <Ionicons name="play-circle" size={30} color={colors.brand} />
+            </View>
+          )}
+        </View>
+        <Text style={s.courseTitle} numberOfLines={2}>
+          {course.title}
+        </Text>
+        <View style={s.progressWrap}>
+          <ProgressBar value={pct} />
+        </View>
+        <Text style={s.courseMeta}>{Math.round(pct)}% complete</Text>
+      </TouchableOpacity>
+    );
+  };
 
   const renderBook = ({ item: b }: { item: any }) => (
     <TouchableOpacity
@@ -62,130 +101,81 @@ export default function LibraryScreen() {
       activeOpacity={0.85}
       onPress={() => nav.navigate("BookDetail", { idOrSlug: b.slug || b.id })}
     >
-      <BookCover url={b.coverUrl} title={b.title} size="md" />
+      <View>
+        <BookCover url={b.coverUrl} title={b.title} size="md" />
+        {isAudio(b) ? (
+          <View style={s.audioTag}>
+            <Ionicons name="headset" size={12} color="#fff" />
+          </View>
+        ) : null}
+      </View>
       <Text style={s.title} numberOfLines={2}>
         {b.title}
       </Text>
       <Text style={s.author} numberOfLines={1}>
         {b.author || "Prof. Dr. Javed Iqbal"}
       </Text>
-      <Text style={s.price}>{formatPrice(b.price, b.currency)}</Text>
     </TouchableOpacity>
   );
 
   return (
     <View style={s.wrap}>
-      <TouchableOpacity
-        style={s.audioBanner}
-        activeOpacity={0.85}
-        onPress={() => nav.navigate("AudioBooks")}
-      >
-        <View style={s.audioIcon}>
-          <Ionicons name="headset" size={20} color="#fff" />
-        </View>
-        <View style={s.flex1}>
-          <Text style={s.audioTitle}>Audio Books</Text>
-          <Text style={s.audioSub}>Listen to narrated titles — anywhere</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
-      </TouchableOpacity>
-
-      <View style={s.searchRow}>
-        <TextInput
-          value={q}
-          onChangeText={setQ}
-          placeholder="Search books and authors"
-          placeholderTextColor={colors.muted}
-          style={s.search}
-        />
-      </View>
-
       <View style={s.tabs}>
+        <Pill
+          label="Courses"
+          active={tab === "courses"}
+          onPress={() => setTab("courses")}
+        />
         <Pill
           label="Books"
           active={tab === "books"}
           onPress={() => setTab("books")}
         />
-        <Pill
-          label="Bundles"
-          active={tab === "bundles"}
-          onPress={() => setTab("bundles")}
-        />
       </View>
 
-      {tab === "books" ? (
+      {tab === "courses" ? (
+        <FlatList
+          data={courses}
+          keyExtractor={(e: any, i) => e.id || e.courseId || String(i)}
+          renderItem={renderCourse}
+          numColumns={2}
+          columnWrapperStyle={s.col}
+          contentContainerStyle={s.listContent}
+          ListEmptyComponent={
+            <EmptyState
+              icon="school-outline"
+              title="No courses yet"
+              subtitle="Courses you purchase will appear here."
+            />
+          }
+        />
+      ) : (
         <>
-          {cats.length ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={s.catBar}
-              contentContainerStyle={s.catContent}
-            >
-              <Pill label="All" active={!cat} onPress={() => setCat(null)} />
-              {cats.map((c: any) => (
-                <Pill
-                  key={c.id}
-                  label={c.name}
-                  active={cat === c.id}
-                  onPress={() => setCat(c.id)}
-                />
-              ))}
-            </ScrollView>
-          ) : null}
+          <View style={s.searchRow}>
+            <TextInput
+              value={q}
+              onChangeText={setQ}
+              placeholder="Search your books"
+              placeholderTextColor={colors.muted}
+              style={s.search}
+            />
+          </View>
           <FlatList
-            data={filteredBooks}
-            keyExtractor={(b: any) => b.id}
+            data={ownedBooks}
+            keyExtractor={(b: any, i) => b.id || String(i)}
             renderItem={renderBook}
             numColumns={2}
             columnWrapperStyle={s.col}
             contentContainerStyle={s.listContent}
             ListEmptyComponent={
               <EmptyState
-                title="No books found"
-                subtitle="Try a different search or category."
+                icon="book-outline"
+                title="No books yet"
+                subtitle="Ebooks and audiobooks you purchase will appear here."
               />
             }
           />
         </>
-      ) : (
-        <FlatList
-          data={bundles}
-          keyExtractor={(b: any) => b.id}
-          contentContainerStyle={s.listContent}
-          ListEmptyComponent={
-            <EmptyState
-              icon="albums-outline"
-              title="No bundles yet"
-              subtitle="Curated collections are coming soon."
-            />
-          }
-          renderItem={({ item: bn }: { item: any }) => (
-            <TouchableOpacity
-              style={s.bundleCard}
-              activeOpacity={0.85}
-              onPress={() =>
-                nav.navigate("BookDetail", {
-                  idOrSlug: bn.slug || bn.id,
-                  type: "bundle",
-                })
-              }
-            >
-              <View style={s.flex1}>
-                <Text style={s.bundleTitle}>{bn.title}</Text>
-                <Text style={s.bundleMeta} numberOfLines={2}>
-                  {bn.description || "Book bundle"}
-                </Text>
-                <Text style={s.bundleCount}>
-                  {arr(bn.items).length || bn.bookCount || ""} books included
-                </Text>
-              </View>
-              <Text style={s.bundlePrice}>
-                {formatPrice(bn.price, bn.currency)}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
       )}
     </View>
   );
@@ -193,27 +183,7 @@ export default function LibraryScreen() {
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
-  flex1: { flex: 1 },
-  audioBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: colors.brandLight,
-    borderRadius: radius.lg,
-    padding: 14,
-    marginHorizontal: spacing.lg,
-    marginTop: 12,
-  },
-  audioIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.brand,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  audioTitle: { fontSize: 15, fontWeight: "800", color: colors.brandDark },
-  audioSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  tabs: { flexDirection: "row", paddingHorizontal: spacing.lg, paddingTop: 12 },
   searchRow: { paddingHorizontal: spacing.lg, paddingTop: 12 },
   search: {
     backgroundColor: colors.card,
@@ -224,42 +194,43 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     color: colors.text,
   },
-  tabs: { flexDirection: "row", paddingHorizontal: spacing.lg, paddingTop: 12 },
-  catBar: { maxHeight: 48, marginTop: 4 },
-  catContent: { paddingHorizontal: spacing.lg, paddingVertical: 8 },
   listContent: { padding: spacing.lg, paddingBottom: 32 },
   col: { justifyContent: "space-between" },
   gridItem: { width: "48%", marginBottom: 18 },
   title: { fontSize: 14, fontWeight: "700", color: colors.text, marginTop: 8 },
   author: { fontSize: 12, color: colors.muted, marginTop: 2 },
-  price: { fontSize: 13, fontWeight: "700", color: colors.brand, marginTop: 4 },
-  bundleCard: {
-    flexDirection: "row",
+  audioTag: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.brand,
     alignItems: "center",
-    backgroundColor: colors.card,
+    justifyContent: "center",
+  },
+  courseCard: { width: "48%", marginBottom: 18 },
+  courseCover: {
+    width: "100%",
+    aspectRatio: 16 / 9,
     borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 16,
-    marginBottom: 12,
+    overflow: "hidden",
+    backgroundColor: colors.brandLight,
   },
-  bundleTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
-  bundleMeta: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 4,
-    lineHeight: 18,
+  courseCoverImg: { width: "100%", height: "100%" },
+  courseCoverFallback: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  bundleCount: {
-    fontSize: 12,
-    color: colors.brand,
-    fontWeight: "600",
-    marginTop: 6,
+  courseTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+    marginTop: 8,
   },
-  bundlePrice: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: colors.brand,
-    marginLeft: 12,
-  },
+  progressWrap: { marginTop: 8 },
+  courseMeta: { fontSize: 12, color: colors.muted, marginTop: 6 },
 });

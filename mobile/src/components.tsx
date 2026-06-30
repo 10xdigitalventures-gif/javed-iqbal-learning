@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Modal,
   Text,
   TextInput,
@@ -83,10 +85,54 @@ export function Badge({
   );
 }
 
+// Four brand dots that pulse in sequence to signal loading.
+function LoadingDots() {
+  const a0 = useRef(new Animated.Value(0.3)).current;
+  const a1 = useRef(new Animated.Value(0.3)).current;
+  const a2 = useRef(new Animated.Value(0.3)).current;
+  const a3 = useRef(new Animated.Value(0.3)).current;
+  const dots = [a0, a1, a2, a3];
+
+  useEffect(() => {
+    const anims = dots.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 150),
+          Animated.timing(v, {
+            toValue: 1,
+            duration: 350,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(v, {
+            toValue: 0.3,
+            duration: 350,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+      ),
+    );
+    anims.forEach((a) => a.start());
+    return () => anims.forEach((a) => a.stop());
+  }, []);
+
+  return (
+    <View style={styles.dotsRow}>
+      {dots.map((v, i) => {
+        const dotStyle = { opacity: v, transform: [{ scale: v }] };
+        return <Animated.View key={i} style={[styles.dot, dotStyle]} />;
+      })}
+    </View>
+  );
+}
+
 export function Loading() {
   return (
     <View style={styles.center}>
       <ActivityIndicator color={colors.brand} size="large" />
+      <Text style={styles.loadingText}>Loading</Text>
+      <LoadingDots />
     </View>
   );
 }
@@ -97,36 +143,34 @@ export function ErrorText({ message }: { message?: string | null }) {
 }
 
 // Friendly metadata for each payment gateway key returned by /payments/providers.
-const GATEWAY_META: Record<
-  string,
-  { label: string; sub: string; icon: any }
-> = {
-  gopayfast: {
-    label: "PayFast",
-    sub: "Cards, wallets & bank \u2022 Pakistan",
-    icon: "card-outline",
-  },
-  payfast: {
-    label: "PayFast",
-    sub: "Cards, wallets & bank \u2022 Pakistan",
-    icon: "card-outline",
-  },
-  whop: {
-    label: "Whop",
-    sub: "International cards & wallets",
-    icon: "globe-outline",
-  },
-  mock: {
-    label: "Test checkout",
-    sub: "Development sandbox",
-    icon: "flask-outline",
-  },
-  bank_transfer: {
-    label: "Bank transfer",
-    sub: "Direct deposit \u2022 manual verification",
-    icon: "business-outline",
-  },
-};
+const GATEWAY_META: Record<string, { label: string; sub: string; icon: any }> =
+  {
+    gopayfast: {
+      label: "PayFast",
+      sub: "Cards, wallets & bank \u2022 Pakistan",
+      icon: "card-outline",
+    },
+    payfast: {
+      label: "PayFast",
+      sub: "Cards, wallets & bank \u2022 Pakistan",
+      icon: "card-outline",
+    },
+    whop: {
+      label: "Whop",
+      sub: "International cards & wallets",
+      icon: "globe-outline",
+    },
+    mock: {
+      label: "Test checkout",
+      sub: "Development sandbox",
+      icon: "flask-outline",
+    },
+    bank_transfer: {
+      label: "Bank transfer",
+      sub: "Direct deposit \u2022 manual verification",
+      icon: "business-outline",
+    },
+  };
 
 // Bottom-sheet style picker that lets the user choose a payment gateway
 // (e.g. PayFast or Whop) before a checkout session is created.
@@ -156,12 +200,11 @@ export function GatewayModal({
           <Text style={gw.title}>Choose payment method</Text>
           <Text style={gw.sub}>Select how you would like to pay.</Text>
           {providers.map((p) => {
-            const m =
-              GATEWAY_META[p] || {
-                label: p,
-                sub: "",
-                icon: "card-outline",
-              };
+            const m = GATEWAY_META[p] || {
+              label: p,
+              sub: "",
+              icon: "card-outline",
+            };
             return (
               <TouchableOpacity
                 key={p}
@@ -185,11 +228,7 @@ export function GatewayModal({
               </TouchableOpacity>
             );
           })}
-          <TouchableOpacity
-            style={gw.cancel}
-            onPress={onClose}
-            disabled={busy}
-          >
+          <TouchableOpacity style={gw.cancel} onPress={onClose} disabled={busy}>
             <Text style={gw.cancelText}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -235,6 +274,20 @@ export const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
   badgeText: { fontSize: 11, fontWeight: "600" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  dotsRow: { flexDirection: "row", marginTop: 12 },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.brand,
+    marginHorizontal: 5,
+  },
   error: {
     backgroundColor: "#fee2e2",
     color: colors.red,

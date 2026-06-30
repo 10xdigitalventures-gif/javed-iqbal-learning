@@ -12,6 +12,7 @@ export type User = {
   title?: string;
   isActive?: boolean;
   maxDevices?: number;
+  tags?: string[];
 };
 
 export type PackageChannel = "TEXT" | "AUDIO" | "VIDEO" | "COMBINED";
