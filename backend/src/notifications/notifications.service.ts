@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, OnModuleInit } from "@nestjs/common";
 import { NotificationChannel } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
@@ -36,7 +36,7 @@ export type UpdatePreferenceInput = {
 };
 
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private mail: MailService,
@@ -200,6 +200,103 @@ export class NotificationsService {
       }
     }
     return { recipients: ids.length, sent };
+  }
+
+  // ---- Scheduled broadcasts ----
+  // A lightweight in-process poller (no extra dependency) checks once a minute
+  // for due scheduled broadcasts and dispatches them.
+  onModuleInit() {
+    const timer = setInterval(() => {
+      this.runDueScheduled().catch(() => {
+        // best-effort; a failed tick retries on the next minute
+      });
+    }, 60_000);
+    // Do not keep the event loop alive solely for this timer.
+    if (typeof timer.unref === "function") timer.unref();
+  }
+
+  async scheduleBroadcast(opts: {
+    title: string;
+    body?: string;
+    segment: string;
+    tag?: string;
+    since?: string;
+    until?: string;
+    scheduleType: string;
+    runAt: string;
+    createdById?: string;
+  }) {
+    const type = opts.scheduleType === "daily" ? "daily" : "once";
+    const nextRunAt = new Date(opts.runAt);
+    if (isNaN(nextRunAt.getTime()))
+      throw new BadRequestException("Invalid schedule time");
+    return this.prisma.scheduledNotification.create({
+      data: {
+        title: opts.title,
+        body: opts.body ?? null,
+        segment: opts.segment || "all",
+        tag: opts.tag ?? null,
+        since: opts.since ?? null,
+        until: opts.until ?? null,
+        scheduleType: type,
+        nextRunAt,
+        createdById: opts.createdById ?? null,
+      },
+    });
+  }
+
+  listScheduled() {
+    return this.prisma.scheduledNotification.findMany({
+      orderBy: [{ active: "desc" }, { nextRunAt: "asc" }],
+      take: 200,
+    });
+  }
+
+  async cancelScheduled(id: string) {
+    await this.prisma.scheduledNotification.updateMany({
+      where: { id },
+      data: { active: false },
+    });
+    return { ok: true };
+  }
+
+  // Dispatch every active scheduled broadcast whose time has arrived.
+  async runDueScheduled() {
+    const now = new Date();
+    const due = await this.prisma.scheduledNotification.findMany({
+      where: { active: true, nextRunAt: { lte: now } },
+    });
+    for (const job of due) {
+      try {
+        await this.broadcast({
+          title: job.title,
+          body: job.body ?? undefined,
+          segment: job.segment,
+          tag: job.tag ?? undefined,
+          since: job.since ?? undefined,
+          until: job.until ?? undefined,
+        });
+      } catch {
+        // best-effort; will retry next tick if still due
+      }
+      if (job.scheduleType === "daily") {
+        // Roll forward in 24h steps until the next run is in the future.
+        let next = new Date(job.nextRunAt.getTime());
+        do {
+          next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+        } while (next <= now);
+        await this.prisma.scheduledNotification.update({
+          where: { id: job.id },
+          data: { lastRunAt: now, nextRunAt: next },
+        });
+      } else {
+        await this.prisma.scheduledNotification.update({
+          where: { id: job.id },
+          data: { lastRunAt: now, active: false },
+        });
+      }
+    }
+    return { dispatched: due.length };
   }
 
   // Send a test notification to the user across all of their enabled channels

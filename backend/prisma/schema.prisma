@@ -1397,3 +1397,26 @@ model LiveSession {
 
   @@index([courseId])
 }
+
+
+// An admin broadcast queued to send later (scheduleType "once") or every day
+// (scheduleType "daily"). A 60s in-process poller dispatches due rows; "once"
+// rows deactivate after firing, "daily" rows roll nextRunAt forward 24h.
+model ScheduledNotification {
+  id           String    @id @default(cuid())
+  title        String
+  body         String?
+  segment      String    @default("all")
+  tag          String?
+  since        String?
+  until        String?
+  scheduleType String    @default("once")
+  nextRunAt    DateTime
+  lastRunAt    DateTime?
+  active       Boolean   @default(true)
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([active, nextRunAt])
+}

@@ -390,7 +390,7 @@ function ChapterManager({ bookId }: { bookId: string }) {
                 </div>
 
                 <input
-                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-urdu text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                   dir="rtl"
                   value={c.titleUrdu || ""}
                   onChange={(e) =>
@@ -426,7 +426,7 @@ function ChapterManager({ bookId }: { bookId: string }) {
                 )}
 
                 <Textarea
-                  className="mt-3"
+                  className="mt-3 font-urdu"
                   dir="rtl"
                   rows={5}
                   placeholder="Urdu version of this chapter's text (optional). Leave empty for an English-only book."
@@ -672,6 +672,8 @@ export default function EbooksAdminPage() {
                 />
                 <Input
                   label="Title (Urdu, optional)"
+                  className="font-urdu"
+                  dir="rtl"
                   dir="rtl"
                   value={form.titleUrdu}
                   onChange={(e) =>
@@ -742,6 +744,8 @@ export default function EbooksAdminPage() {
               />
               <Textarea
                 label="Description (Urdu, optional)"
+                className="font-urdu"
+                dir="rtl"
                 dir="rtl"
                 rows={3}
                 value={form.descriptionUrdu}
@@ -778,6 +782,8 @@ export default function EbooksAdminPage() {
 
               <Textarea
                 label="Full E-Book Text Content (Urdu, optional)"
+                className="font-urdu"
+                dir="rtl"
                 dir="rtl"
                 rows={8}
                 placeholder="Urdu version of the full single-file book text (optional). Readers get a language toggle when this is filled."

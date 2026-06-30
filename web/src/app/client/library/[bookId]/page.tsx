@@ -150,7 +150,7 @@ export default function ReaderPage() {
               dir={data.language === "ur" ? "rtl" : "ltr"}
               onContextMenu={(e) => e.preventDefault()}
               onCopy={(e) => e.preventDefault()}
-              className={`prose prose-slate relative z-10 max-w-none select-none whitespace-pre-wrap text-[15px] leading-7 text-slate-800 print:hidden ${data.language === "ur" ? "text-right" : ""}`}
+              className={`prose prose-slate relative z-10 max-w-none select-none whitespace-pre-wrap text-[15px] leading-7 text-slate-800 print:hidden ${data.language === "ur" ? "text-right font-urdu" : ""}`}
             >
               {data.content}
             </article>

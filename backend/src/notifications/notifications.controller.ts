@@ -8,7 +8,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { NotificationsService } from "./notifications.service";
-import { UpdatePreferenceDto, BroadcastDto } from "./dto";
+import { UpdatePreferenceDto, BroadcastDto, ScheduleBroadcastDto } from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
@@ -64,6 +64,30 @@ export class NotificationsController {
   @Roles(Role.ADMIN)
   broadcast(@Body() dto: BroadcastDto) {
     return this.service.broadcast(dto);
+  }
+
+  // Admin: queue a broadcast to send later or daily.
+  @Post("schedule")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  schedule(@CurrentUser() user: AuthUser, @Body() dto: ScheduleBroadcastDto) {
+    return this.service.scheduleBroadcast({ ...dto, createdById: user.userId });
+  }
+
+  // Admin: list queued / recurring scheduled broadcasts.
+  @Get("scheduled")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  listScheduled() {
+    return this.service.listScheduled();
+  }
+
+  // Admin: cancel a scheduled / recurring broadcast.
+  @Post("scheduled/:id/cancel")
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  cancelScheduled(@Param("id") id: string) {
+    return this.service.cancelScheduled(id);
   }
 
   @Post(":id/read")

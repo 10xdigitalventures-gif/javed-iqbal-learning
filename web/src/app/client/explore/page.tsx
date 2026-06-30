@@ -52,6 +52,8 @@ function isAudio(b: Book) {
 }
 
 function CoverArt({ item }: { item: Item }) {
+  const isCourse = item.kind === "course";
+  const ratio = isCourse ? "aspect-video" : "aspect-[3/4]";
   const Icon =
     item.kind === "course"
       ? GraduationCap
@@ -59,7 +61,11 @@ function CoverArt({ item }: { item: Item }) {
         ? Headphones
         : BookOpen;
   return (
-    <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl bg-brand-light">
+    <div
+      className={
+        "relative w-full overflow-hidden rounded-xl bg-brand-light " + ratio
+      }
+    >
       {item.coverUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img

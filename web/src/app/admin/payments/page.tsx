@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, signMedia } from "@/lib/api";
-import { Badge, Card, Input, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, Input, Select, Spinner } from "@/components/ui";
 import {
   Pager,
   buildQuery,
@@ -10,6 +10,29 @@ import {
   type Paged,
 } from "@/components/list-controls";
 import { PageHeader } from "@/components/shell";
+
+// Build a CSV file from rows and trigger a browser download (UTF-8 + BOM so
+// Excel renders Urdu/Arabic text correctly).
+function downloadCsv(
+  filename: string,
+  headers: string[],
+  rows: (string | number)[][],
+) {
+  const esc = (v: string | number) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n");
+  const blob = new Blob(["\ufeff" + csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 type Payment = {
   id: string;
@@ -130,6 +153,48 @@ export default function AdminPayments() {
 
 function OrdersTab() {
   const [data, setData] = useState<Paged<Order> | null>(null);
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const q2 = buildQuery({
+        q: debouncedQ,
+        status,
+        sort,
+        order,
+        page: 1,
+        pageSize: 100000,
+      });
+      const all = await api<Paged<Order>>(`/orders/all/paged${q2}`);
+      downloadCsv(
+        "orders.csv",
+        [
+          "Client",
+          "Email",
+          "Product",
+          "Type",
+          "Amount",
+          "Currency",
+          "Status",
+          "Date",
+        ],
+        (all.rows || []).map((o) => [
+          o.user?.name || "",
+          o.user?.email || "",
+          productName(o),
+          o.kind,
+          o.amount,
+          o.currency,
+          statusLabel[o.status] || o.status,
+          new Date(o.createdAt).toLocaleString(),
+        ]),
+      );
+    } catch {
+      // ignore export errors
+    } finally {
+      setExporting(false);
+    }
+  }
   const [q, setQ] = useState("");
   const debouncedQ = useDebounced(q);
   const [status, setStatus] = useState("");
@@ -161,6 +226,11 @@ function OrdersTab() {
 
   return (
     <div>
+      <div className="mb-3 flex justify-end">
+        <Button variant="outline" onClick={exportCsv} disabled={exporting}>
+          {exporting ? "Exporting\u2026" : "Export CSV"}
+        </Button>
+      </div>
       <Card className="mb-3">
         <div className="grid gap-3 md:grid-cols-4">
           <Input
@@ -270,6 +340,52 @@ function OrdersTab() {
 
 function TransactionsTab() {
   const [data, setData] = useState<Paged<Payment> | null>(null);
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const q2 = buildQuery({
+        channel: "online",
+        q: debouncedQ,
+        status,
+        gateway,
+        sort,
+        order,
+        page: 1,
+        pageSize: 100000,
+      });
+      const all = await api<Paged<Payment>>(`/payments/all/paged${q2}`);
+      downloadCsv(
+        "transactions.csv",
+        [
+          "Invoice",
+          "Client",
+          "Email",
+          "Gateway",
+          "Amount",
+          "Currency",
+          "Kind",
+          "Status",
+          "Date",
+        ],
+        (all.rows || []).map((p) => [
+          p.invoiceNo || "",
+          p.user?.name || "",
+          p.user?.email || "",
+          gatewayLabel[p.gateway || ""] || p.gateway || "",
+          p.amount,
+          p.currency,
+          p.kind,
+          p.status,
+          new Date(p.createdAt).toLocaleString(),
+        ]),
+      );
+    } catch {
+      // ignore export errors
+    } finally {
+      setExporting(false);
+    }
+  }
   const [q, setQ] = useState("");
   const debouncedQ = useDebounced(q);
   const [status, setStatus] = useState("");
@@ -305,6 +421,11 @@ function TransactionsTab() {
 
   return (
     <div>
+      <div className="mb-3 flex justify-end">
+        <Button variant="outline" onClick={exportCsv} disabled={exporting}>
+          {exporting ? "Exporting\u2026" : "Export CSV"}
+        </Button>
+      </div>
       <Card className="mb-3">
         <div className="grid gap-3 md:grid-cols-5">
           <Input
@@ -431,6 +552,51 @@ function TransactionsTab() {
 
 function BankTransfersTab() {
   const [data, setData] = useState<Paged<Payment> | null>(null);
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const q2 = buildQuery({
+        channel: "bank",
+        q: debouncedQ,
+        status,
+        sort,
+        order,
+        page: 1,
+        pageSize: 100000,
+      });
+      const all = await api<Paged<Payment>>(`/payments/all/paged${q2}`);
+      downloadCsv(
+        "bank-transfers.csv",
+        [
+          "Client",
+          "Email",
+          "Amount",
+          "Currency",
+          "Sender",
+          "Ref",
+          "Note",
+          "Status",
+          "Date",
+        ],
+        (all.rows || []).map((p) => [
+          p.user?.name || "",
+          p.user?.email || "",
+          p.amount,
+          p.currency,
+          p.senderName || "",
+          p.senderRef || "",
+          p.manualNote || "",
+          p.status,
+          new Date(p.createdAt).toLocaleString(),
+        ]),
+      );
+    } catch {
+      // ignore export errors
+    } finally {
+      setExporting(false);
+    }
+  }
   const [q, setQ] = useState("");
   const debouncedQ = useDebounced(q);
   const [status, setStatus] = useState("");
@@ -522,6 +688,11 @@ function BankTransfersTab() {
         <p className="mb-3 text-sm font-medium text-red-600">{error}</p>
       ) : null}
 
+      <div className="mb-3 flex justify-end">
+        <Button variant="outline" onClick={exportCsv} disabled={exporting}>
+          {exporting ? "Exporting\u2026" : "Export CSV"}
+        </Button>
+      </div>
       <Card className="mb-3">
         <div className="grid gap-3 md:grid-cols-4">
           <Input
@@ -732,6 +903,43 @@ type HardCopyOrder = {
 
 function HardCopyTab() {
   const [rows, setRows] = useState<HardCopyOrder[] | null>(null);
+  const [exporting, setExporting] = useState(false);
+  function exportCsv() {
+    setExporting(true);
+    try {
+      downloadCsv(
+        "hardcopy-orders.csv",
+        [
+          "Customer",
+          "Phone",
+          "Email",
+          "Book",
+          "Qty",
+          "Address",
+          "City",
+          "Payment",
+          "Status",
+          "Date",
+        ],
+        (rows || []).map((o) => [
+          o.name,
+          o.phone,
+          o.user?.email || "",
+          o.book?.title || "",
+          o.quantity,
+          o.address,
+          o.city,
+          hcPayLabel[o.paymentMethod || "cod"] ||
+            o.paymentMethod ||
+            "Cash on Delivery",
+          o.status,
+          new Date(o.createdAt).toLocaleString(),
+        ]),
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -765,6 +973,15 @@ function HardCopyTab() {
 
   return (
     <div>
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="outline"
+          onClick={exportCsv}
+          disabled={exporting || !rows}
+        >
+          {exporting ? "Exporting\u2026" : "Export CSV"}
+        </Button>
+      </div>
       {error ? (
         <p className="mb-3 text-sm font-medium text-red-600">{error}</p>
       ) : null}

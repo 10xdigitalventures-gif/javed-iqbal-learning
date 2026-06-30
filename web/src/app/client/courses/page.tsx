@@ -28,10 +28,17 @@ type Enrollment = {
 function CourseCover({ course }: { course: Course }) {
   if (course.coverUrl) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={course.coverUrl} alt={course.title} className="h-36 w-full rounded-lg object-cover" />;
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={course.coverUrl}
+        alt={course.title}
+        className="aspect-video w-full rounded-lg object-cover"
+      />
+    );
   }
   return (
-    <div className="flex h-36 w-full items-center justify-center rounded-lg bg-brand-light text-brand">
+    <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-brand-light text-brand">
       <GraduationCap className="h-10 w-10" />
     </div>
   );
@@ -44,8 +51,12 @@ export default function CoursesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<Course[]>("/courses").then(setCourses).catch((e) => setError(e.message));
-    api<Enrollment[]>("/courses/me/enrolled").then(setMine).catch(() => setMine([]));
+    api<Course[]>("/courses")
+      .then(setCourses)
+      .catch((e) => setError(e.message));
+    api<Enrollment[]>("/courses/me/enrolled")
+      .then(setMine)
+      .catch(() => setMine([]));
   }, []);
 
   const enrolledIds = new Set((mine ?? []).map((e) => e.courseId));
@@ -90,19 +101,29 @@ export default function CoursesPage() {
                     {enrolled ? <Badge color="green">Enrolled</Badge> : null}
                   </div>
                   {c.description ? (
-                    <p className="mt-1 line-clamp-2 text-xs text-slate-400">{c.description}</p>
+                    <p className="mt-1 line-clamp-2 text-xs text-slate-400">
+                      {c.description}
+                    </p>
                   ) : null}
-                  <p className="mt-2 text-xs text-slate-500">{lessonCount} lessons</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {lessonCount} lessons
+                  </p>
                   <Link href={`/client/courses/${c.id}`} className="mt-3">
                     <Button className="w-full">
-                      {enrolled ? "Continue" : c.price > 0 ? `${c.currency} ${c.price.toLocaleString()}` : "View course"}
+                      {enrolled
+                        ? "Continue"
+                        : c.price > 0
+                          ? `${c.currency} ${c.price.toLocaleString()}`
+                          : "View course"}
                     </Button>
                   </Link>
                 </Card>
               );
             })}
             {courses.length === 0 ? (
-              <p className="text-sm text-slate-400">No courses published yet.</p>
+              <p className="text-sm text-slate-400">
+                No courses published yet.
+              </p>
             ) : null}
           </div>
         )
@@ -131,7 +152,9 @@ export default function CoursesPage() {
                   <div className="h-1.5 w-full rounded-full bg-slate-100">
                     <div
                       className="h-1.5 rounded-full bg-brand"
-                      style={{ width: `${Math.min(100, e.percentComplete ?? 0)}%` }}
+                      style={{
+                        width: `${Math.min(100, e.percentComplete ?? 0)}%`,
+                      }}
                     />
                   </div>
                 </div>

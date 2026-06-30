@@ -53,3 +53,13 @@ export class BroadcastDto {
   @IsString()
   until?: string;
 }
+
+export class ScheduleBroadcastDto extends BroadcastDto {
+  // "once" = fire a single time at runAt; "daily" = every day at runAt's time.
+  @IsString()
+  scheduleType: string;
+
+  // ISO datetime of the first (or only) run.
+  @IsString()
+  runAt: string;
+}

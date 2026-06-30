@@ -139,7 +139,14 @@ export class LibraryService {
       throw new ForbiddenException("Purchase this book to read it");
 
     const wantUrdu = (lang || "").toLowerCase().startsWith("ur");
-    const plaintext = this.resolveProtectedSource(book, chapter, wantUrdu);
+    // Fall back to Urdu automatically when a chapter/book has no English text
+    // (e.g. an Urdu-only scan), so the default view is never blank.
+    const hasEnglish = !!(chapter ? chapter.contentKey : book.contentKey);
+    const hasUrduContent = !!(chapter
+      ? chapter.contentKeyUrdu
+      : book.contentKeyUrdu);
+    const useUrdu = wantUrdu || (!hasEnglish && hasUrduContent);
+    const plaintext = this.resolveProtectedSource(book, chapter, useUrdu);
     const encrypted = this.encryptForUser(userId, bookId, plaintext);
     return {
       bookId,
@@ -153,10 +160,9 @@ export class LibraryService {
         titleUrdu: c.titleUrdu,
         isFree: c.isFree,
       })),
-      language: wantUrdu ? "ur" : "en",
+      language: useUrdu ? "ur" : "en",
       hasUrdu: !!(
-        book.contentKeyUrdu ||
-        book.chapters.some((c) => c.contentKeyUrdu)
+        book.contentKeyUrdu || book.chapters.some((c) => c.contentKeyUrdu)
       ),
       locked: !hasFull,
       isFree,
@@ -366,6 +372,10 @@ export class LibraryService {
     }
     if (chapter?.contentKey) return chapter.contentKey;
     if (book.contentKey) return book.contentKey;
+    // Last resort: if only an Urdu edition exists, serve it rather than the
+    // synthetic placeholder below.
+    if (chapter?.contentKeyUrdu) return chapter.contentKeyUrdu;
+    if (book.contentKeyUrdu) return book.contentKeyUrdu;
     const heading = chapter ? chapter.title : book.title;
     return (
       `# ${heading}\n\n${book.title} — by ${book.author}.\n\n` +

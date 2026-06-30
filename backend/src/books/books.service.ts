@@ -467,12 +467,16 @@ export class BooksService {
         : 0;
 
     for (let i = 0; i < sections.length; i++) {
+      const { english, urdu } = this.splitScript(sections[i].content);
       await this.prisma.chapter.create({
         data: {
           bookId,
           index: offset + i,
           title: sections[i].title,
-          contentKey: sections[i].content,
+          // English text goes to contentKey, Urdu text to contentKeyUrdu so the
+          // reader's language toggle shows each script in its own edition.
+          contentKey: english || null,
+          contentKeyUrdu: urdu || null,
         },
       });
     }
@@ -733,6 +737,34 @@ export class BooksService {
     if (buf.trim())
       out.push({ title: `Section ${out.length + 1}`, content: buf.trim() });
     return out;
+  }
+
+  // Separate a chapter's text into an English (Latin) part and an Urdu
+  // (Arabic-script) part. Whole-chapter when one script clearly dominates,
+  // otherwise line-by-line so genuinely bilingual scans split cleanly.
+  private splitScript(content: string): { english: string; urdu: string } {
+    const text = (content || "").trim();
+    if (!text) return { english: "", urdu: "" };
+    const urduTotal = (text.match(/[\u0600-\u06FF]/g) || []).length;
+    const latinTotal = (text.match(/[A-Za-z]/g) || []).length;
+
+    // Overwhelmingly one language -> keep it whole in that field.
+    if (urduTotal > 0 && latinTotal <= urduTotal * 0.15)
+      return { english: "", urdu: text };
+    if (latinTotal > 0 && urduTotal <= latinTotal * 0.15)
+      return { english: text, urdu: "" };
+
+    // Mixed -> route each line by its dominant script.
+    const eng: string[] = [];
+    const urd: string[] = [];
+    for (const line of text.split("\n")) {
+      const u = (line.match(/[\u0600-\u06FF]/g) || []).length;
+      const l = (line.match(/[A-Za-z]/g) || []).length;
+      if (u === 0 && l === 0) continue; // blank / punctuation-only
+      if (u >= l) urd.push(line);
+      else eng.push(line);
+    }
+    return { english: eng.join("\n").trim(), urdu: urd.join("\n").trim() };
   }
 
   // ---- Bundles ----

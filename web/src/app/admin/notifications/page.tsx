@@ -13,6 +13,17 @@ import {
 import { PageHeader } from "@/components/shell";
 
 type Segment = "all" | "tag" | "purchase";
+type WhenMode = "now" | "later" | "daily";
+type Scheduled = {
+  id: string;
+  title: string;
+  body?: string | null;
+  segment: string;
+  tag?: string | null;
+  scheduleType: string;
+  nextRunAt: string;
+  active: boolean;
+};
 
 export default function AdminNotifications() {
   const [title, setTitle] = useState("");
@@ -21,6 +32,9 @@ export default function AdminNotifications() {
   const [tag, setTag] = useState("");
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
+  const [whenMode, setWhenMode] = useState<WhenMode>("now");
+  const [runAt, setRunAt] = useState("");
+  const [scheduled, setScheduled] = useState<Scheduled[]>([]);
 
   const [tags, setTags] = useState<string[]>([]);
   const [count, setCount] = useState<number | null>(null);
@@ -32,6 +46,16 @@ export default function AdminNotifications() {
     api<string[]>("/users/tags")
       .then((t) => setTags(t || []))
       .catch(() => setTags([]));
+  }, []);
+
+  function loadScheduled() {
+    api<Scheduled[]>("/notifications/scheduled")
+      .then((s) => setScheduled(s || []))
+      .catch(() => setScheduled([]));
+  }
+
+  useEffect(() => {
+    loadScheduled();
   }, []);
 
   // Reset the recipient preview whenever the targeting changes.
@@ -99,6 +123,59 @@ export default function AdminNotifications() {
       setError(e?.message || "Could not send the notification.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function schedule() {
+    setError(null);
+    setOk(null);
+    if (!title.trim()) {
+      setError("Please enter a notification title.");
+      return;
+    }
+    if (segment === "tag" && !tag.trim()) {
+      setError("Please choose a tag to target.");
+      return;
+    }
+    if (!runAt) {
+      setError("Please pick a date and time.");
+      return;
+    }
+    try {
+      setBusy(true);
+      await api("/notifications/schedule", {
+        method: "POST",
+        body: {
+          ...payload(),
+          scheduleType: whenMode === "daily" ? "daily" : "once",
+          runAt: new Date(runAt).toISOString(),
+        },
+      });
+      setOk(
+        whenMode === "daily"
+          ? "Daily notification scheduled."
+          : "Notification scheduled.",
+      );
+      setTitle("");
+      setBody("");
+      setCount(null);
+      setRunAt("");
+      loadScheduled();
+    } catch (e: any) {
+      setError(e?.message || "Could not schedule the notification.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelScheduled(id: string) {
+    try {
+      await api("/notifications/scheduled/" + id + "/cancel", {
+        method: "POST",
+      });
+      loadScheduled();
+    } catch {
+      // ignore
     }
   }
 
@@ -181,6 +258,29 @@ export default function AdminNotifications() {
           </div>
         ) : null}
 
+        <Select
+          label="When"
+          value={whenMode}
+          onChange={(e) => setWhenMode(e.target.value as WhenMode)}
+        >
+          <option value="now">Send now</option>
+          <option value="later">Schedule for later (one time)</option>
+          <option value="daily">Recurring daily</option>
+        </Select>
+
+        {whenMode !== "now" ? (
+          <Input
+            label={
+              whenMode === "daily"
+                ? "First run (repeats every day at this time)"
+                : "Send at"
+            }
+            type="datetime-local"
+            value={runAt}
+            onChange={(e) => setRunAt(e.target.value)}
+          />
+        ) : null}
+
         {error ? <ErrorText message={error} /> : null}
         {ok ? <p className="text-sm font-medium text-green-600">{ok}</p> : null}
         {count !== null ? (
@@ -194,11 +294,57 @@ export default function AdminNotifications() {
           <Button variant="outline" onClick={preview} disabled={busy}>
             Preview recipients
           </Button>
-          <Button onClick={send} disabled={busy}>
-            {busy ? "Working\u2026" : "Send notification"}
-          </Button>
+          {whenMode === "now" ? (
+            <Button onClick={send} disabled={busy}>
+              {busy ? "Working\u2026" : "Send notification"}
+            </Button>
+          ) : (
+            <Button onClick={schedule} disabled={busy}>
+              {busy
+                ? "Working\u2026"
+                : whenMode === "daily"
+                  ? "Schedule daily"
+                  : "Schedule"}
+            </Button>
+          )}
         </div>
       </Card>
+
+      {scheduled.length > 0 ? (
+        <Card className="space-y-3">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Scheduled notifications
+          </h2>
+          <div className="divide-y divide-slate-100">
+            {scheduled.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-800">
+                    {s.title}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {(s.scheduleType === "daily" ? "Daily" : "One time") +
+                      " · next " +
+                      new Date(s.nextRunAt).toLocaleString() +
+                      (s.active ? "" : " · cancelled")}
+                  </p>
+                </div>
+                {s.active ? (
+                  <button
+                    onClick={() => cancelScheduled(s.id)}
+                    className="shrink-0 text-xs font-medium text-red-600 hover:underline"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }

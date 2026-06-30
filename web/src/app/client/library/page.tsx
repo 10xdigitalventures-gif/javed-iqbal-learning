@@ -39,18 +39,24 @@ const TABS = [
 
 function Cover({ url, kind }: { url?: string; kind: "book" | "course" }) {
   const Icon = kind === "course" ? GraduationCap : BookOpen;
+  const ratio = kind === "course" ? "aspect-video" : "aspect-[3/4]";
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
     return (
       <img
         src={url}
         alt=""
-        className="aspect-[3/4] w-full rounded-xl object-cover"
+        className={"w-full rounded-xl object-cover " + ratio}
       />
     );
   }
   return (
-    <div className="flex aspect-[3/4] w-full items-center justify-center rounded-xl bg-brand-light text-brand">
+    <div
+      className={
+        "flex w-full items-center justify-center rounded-xl bg-brand-light text-brand " +
+        ratio
+      }
+    >
       <Icon className="h-10 w-10" aria-hidden="true" />
     </div>
   );
