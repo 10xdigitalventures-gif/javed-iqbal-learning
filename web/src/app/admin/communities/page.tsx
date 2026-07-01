@@ -13,12 +13,14 @@ import {
   Textarea,
 } from "@/components/ui";
 import { PageHeader } from "@/components/shell";
+import { OfferManager } from "@/components/offer-manager";
 import type { Community } from "@/lib/types";
 
 export default function AdminCommunities() {
   const [list, setList] = useState<Community[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [show, setShow] = useState(false);
+  const [offersFor, setOffersFor] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -137,17 +139,34 @@ export default function AdminCommunities() {
             <p className="mt-2 text-xs text-slate-500">
               {c._count?.members ?? 0} members · {c._count?.posts ?? 0} posts
             </p>
-            {c.isActive ? (
+            <div className="mt-3 flex flex-wrap gap-2">
               <Button
-                variant="danger"
-                className="mt-3"
-                onClick={() => remove(c.id)}
+                variant="outline"
+                onClick={() => setOffersFor((v) => (v === c.id ? null : c.id))}
               >
-                Deactivate
+                {offersFor === c.id ? "Hide plans" : "Manage plans"}
               </Button>
-            ) : (
-              <Badge color="red">Inactive</Badge>
-            )}
+              {c.isActive ? (
+                <Button variant="danger" onClick={() => remove(c.id)}>
+                  Deactivate
+                </Button>
+              ) : (
+                <Badge color="red">Inactive</Badge>
+              )}
+            </div>
+            {offersFor === c.id ? (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <OfferManager
+                  parentId={c.id}
+                  parentKey="communityId"
+                  listUrl={`/communities/${c.id}/offers`}
+                  createUrl="/communities/offers"
+                  mutateBase="/communities/offers"
+                  label="Community packages"
+                  hint="Separate paid/free plans buyers see in the app."
+                />
+              </div>
+            ) : null}
           </Card>
         ))}
       </div>

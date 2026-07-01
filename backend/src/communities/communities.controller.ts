@@ -13,8 +13,10 @@ import { CommunitiesService } from "./communities.service";
 import {
   CreateCommentDto,
   CreateCommunityDto,
+  CreateCommunityOfferDto,
   CreatePostDto,
   UpdateCommunityDto,
+  UpdateCommunityOfferDto,
 } from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
@@ -40,6 +42,43 @@ export class CommunitiesController {
   @Roles(Role.ADMIN)
   all() {
     return this.service.listAll();
+  }
+
+  // ---- Access plans (offers) ----
+  @Get("offers/all")
+  allOffers() {
+    return this.service.listAllActiveOffers();
+  }
+
+  @Post("offers")
+  @Roles(Role.ADMIN)
+  createOffer(@Body() dto: CreateCommunityOfferDto) {
+    return this.service.createOffer(dto);
+  }
+
+  @Patch("offers/:offerId")
+  @Roles(Role.ADMIN)
+  updateOffer(
+    @Param("offerId") offerId: string,
+    @Body() dto: UpdateCommunityOfferDto,
+  ) {
+    return this.service.updateOffer(offerId, dto);
+  }
+
+  @Delete("offers/:offerId")
+  @Roles(Role.ADMIN)
+  removeOffer(@Param("offerId") offerId: string) {
+    return this.service.removeOffer(offerId);
+  }
+
+  @Post("offers/:offerId/buy")
+  buyOffer(@CurrentUser() user: AuthUser, @Param("offerId") offerId: string) {
+    return this.service.buyOffer(user, offerId);
+  }
+
+  @Get(":id/offers")
+  offers(@Param("id") id: string) {
+    return this.service.listOffers(id);
   }
 
   @Post()

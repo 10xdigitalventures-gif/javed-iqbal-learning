@@ -461,6 +461,13 @@ export class CoursesController {
   }
 
   // ======================= Offers (access pricing tiers) =======================
+  // Any authenticated user: all active offers across published courses. Used by
+  // the mobile Explore > Courses tab to show offers instead of raw courses.
+  @Get("offers/all")
+  listAllOffers() {
+    return this.service.listAllOffers();
+  }
+
   @Get(":courseId/offers")
   listOffers(@Param("courseId") courseId: string) {
     return this.service.listOffers(courseId);

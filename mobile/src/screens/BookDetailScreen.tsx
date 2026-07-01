@@ -26,6 +26,7 @@ export default function BookDetailScreen() {
   const idOrSlug: string = route.params?.idOrSlug;
   const type: string = route.params?.type || "book";
   const isBundle = type === "bundle";
+  const offerId: string | undefined = route.params?.offerId;
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -91,8 +92,10 @@ export default function BookDetailScreen() {
       setBusy(true);
       setGwVisible(false);
       const body: any = { kind: isBundle ? "BUNDLE" : "BOOK" };
-      if (isBundle) body.bundleId = item.id;
-      else body.bookId = item.id;
+      if (isBundle) {
+        body.bundleId = item.id;
+        if (offerId) body.offerId = offerId;
+      } else body.bookId = item.id;
       const order = await api("/orders", { method: "POST", body });
       // Manual bank transfer has no hosted checkout: send the buyer to the
       // dedicated screen to upload proof for admin verification.

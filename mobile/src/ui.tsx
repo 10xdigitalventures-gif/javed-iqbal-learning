@@ -42,15 +42,17 @@ export function Pill({
   label,
   active,
   onPress,
+  fill,
 }: {
   label: string;
   active?: boolean;
   onPress?: () => void;
+  fill?: boolean;
 }) {
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={[s.pill, active ? s.pillActive : null]}
+      style={[s.pill, fill ? s.pillFill : null, active ? s.pillActive : null]}
     >
       <Text style={[s.pillText, active ? s.pillTextActive : null]}>
         {label}
@@ -134,6 +136,7 @@ const s = StyleSheet.create({
     marginRight: 8,
   },
   pillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  pillFill: { flex: 1, alignItems: "center" },
   pillText: { fontSize: 13, fontWeight: "600", color: colors.text },
   pillTextActive: { color: "#fff" },
   empty: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 24 },

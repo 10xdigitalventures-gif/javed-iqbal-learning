@@ -10,8 +10,10 @@ import { AuthUser, isAdmin } from "../common/access";
 import {
   CreateCommentDto,
   CreateCommunityDto,
+  CreateCommunityOfferDto,
   CreatePostDto,
   UpdateCommunityDto,
+  UpdateCommunityOfferDto,
 } from "./dto";
 
 @Injectable()
@@ -174,6 +176,109 @@ export class CommunitiesService {
         mediaUrl: dto.mediaUrl,
       },
     });
+  }
+
+  // --- Community access plans (offers) ---
+  listOffers(communityId: string) {
+    return this.prisma.communityOffer.findMany({
+      where: { communityId },
+      orderBy: [{ index: "asc" }, { createdAt: "asc" }],
+    });
+  }
+
+  listAllActiveOffers() {
+    return this.prisma.communityOffer.findMany({
+      where: { isActive: true, community: { isActive: true } },
+      orderBy: [{ index: "asc" }, { createdAt: "asc" }],
+      include: {
+        community: { select: { id: true, name: true, description: true } },
+      },
+    });
+  }
+
+  private async getOffer(id: string) {
+    const o = await this.prisma.communityOffer.findUnique({ where: { id } });
+    if (!o) throw new NotFoundException("Community plan not found");
+    return o;
+  }
+
+  createOffer(dto: CreateCommunityOfferDto) {
+    return this.prisma.communityOffer.create({
+      data: {
+        communityId: dto.communityId,
+        name: dto.name,
+        description: dto.description ?? null,
+        price: dto.price ?? 0,
+        currency: dto.currency || "PKR",
+        accessDurationDays: dto.accessDurationDays ?? null,
+        isActive: dto.isActive ?? true,
+        index: dto.index ?? 0,
+      },
+    });
+  }
+
+  async updateOffer(id: string, dto: UpdateCommunityOfferDto) {
+    await this.getOffer(id);
+    return this.prisma.communityOffer.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        description: dto.description,
+        price: dto.price,
+        currency: dto.currency,
+        accessDurationDays: dto.accessDurationDays,
+        isActive: dto.isActive,
+        index: dto.index,
+      },
+    });
+  }
+
+  async removeOffer(id: string) {
+    await this.getOffer(id);
+    return this.prisma.communityOffer.delete({ where: { id } });
+  }
+
+  // Buy a community access plan. Free plans (and admins) join immediately; paid
+  // plans return a paymentId so the client routes to the gateway checkout.
+  async buyOffer(user: AuthUser, offerId: string) {
+    const offer = await this.getOffer(offerId);
+    if (!offer.isActive) throw new NotFoundException("Plan not available");
+    const existing = await this.prisma.communityMember.findUnique({
+      where: {
+        communityId_userId: {
+          communityId: offer.communityId,
+          userId: user.userId,
+        },
+      },
+    });
+    if (existing) return { joined: true, membership: existing };
+    if (isAdmin(user) || offer.price <= 0) {
+      const membership = await this.prisma.communityMember.upsert({
+        where: {
+          communityId_userId: {
+            communityId: offer.communityId,
+            userId: user.userId,
+          },
+        },
+        update: {},
+        create: { communityId: offer.communityId, userId: user.userId },
+      });
+      return { joined: true, membership };
+    }
+    const { order, payment, itemName } = await this.orders.create(user.userId, {
+      kind: LearningProductKind.COMMUNITY,
+      communityId: offer.communityId,
+      offerId: offer.id,
+    });
+    return {
+      joined: false,
+      requiresPayment: true,
+      paymentId: payment.id,
+      orderId: order.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      itemName,
+    };
   }
 
   async addComment(user: AuthUser, postId: string, dto: CreateCommentDto) {

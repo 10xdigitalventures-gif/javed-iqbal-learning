@@ -489,6 +489,9 @@ export default function EbooksAdminPage() {
   const [books, setBooks] = useState<Book[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, pageSize: 12 });
   const [categories, setCategories] = useState<any[]>([]);
+  const [newCat, setNewCat] = useState("");
+  const [catBusy, setCatBusy] = useState(false);
+  const [catErr, setCatErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Search / filter / sort / pagination state.
@@ -542,11 +545,60 @@ export default function EbooksAdminPage() {
       .catch(() => setBooks([]));
   }
 
-  useEffect(() => {
-    api<any[]>("/categories")
+  function loadCategories() {
+    return api<any[]>("/categories")
       .then((c) => setCategories(Array.isArray(c) ? c : []))
       .catch(() => setCategories([]));
+  }
+
+  useEffect(() => {
+    loadCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function addCategory() {
+    const name = newCat.trim();
+    if (!name) return;
+    setCatBusy(true);
+    setCatErr(null);
+    try {
+      await api("/categories", { method: "POST", body: { name } });
+      setNewCat("");
+      await loadCategories();
+    } catch (e: any) {
+      setCatErr(e?.message || "Could not add category");
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  async function renameCategory(id: string, current: string) {
+    const name = window.prompt("Rename category", current);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === current) return;
+    setCatErr(null);
+    try {
+      await api("/categories/" + id, {
+        method: "PATCH",
+        body: { name: trimmed },
+      });
+      await loadCategories();
+    } catch (e: any) {
+      setCatErr(e?.message || "Could not rename category");
+    }
+  }
+
+  async function deleteCategory(id: string, name: string) {
+    if (!window.confirm('Delete category "' + name + '"?')) return;
+    setCatErr(null);
+    try {
+      await api("/categories/" + id, { method: "DELETE" });
+      await loadCategories();
+    } catch (e: any) {
+      setCatErr(e?.message || "Could not delete category");
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -897,6 +949,56 @@ export default function EbooksAdminPage() {
           )}
         </>
       )}
+
+      <Card className="mt-6">
+        <div className="mb-3">
+          <h3 className="font-semibold">Book categories</h3>
+          <p className="text-sm text-slate-500">
+            Sub-categories shown under Books in the app Explore tab.
+          </p>
+        </div>
+        {catErr ? <ErrorText message={catErr} /> : null}
+        <div className="flex gap-2">
+          <Input
+            placeholder="New category name"
+            value={newCat}
+            onChange={(e) => setNewCat(e.target.value)}
+          />
+          <Button onClick={addCategory} disabled={catBusy}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {categories.length === 0 ? (
+            <p className="text-sm text-slate-500">No categories yet.</p>
+          ) : (
+            categories.map((c: any) => (
+              <span
+                key={c.id}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm"
+              >
+                {c.name}
+                <button
+                  type="button"
+                  onClick={() => renameCategory(c.id, c.name)}
+                  className="text-slate-400 hover:text-brand"
+                  title="Rename"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteCategory(c.id, c.name)}
+                  className="text-slate-400 hover:text-red-500"
+                  title="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+      </Card>
 
       <Card className="mt-6">
         <div className="grid gap-3 md:grid-cols-5">

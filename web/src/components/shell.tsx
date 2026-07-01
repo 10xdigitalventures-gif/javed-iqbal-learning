@@ -39,6 +39,7 @@ const nav = {
     { href: "/admin/notifications", label: "Push Notifications", icon: Bell },
     { href: "/admin/communities", label: "Communities", icon: MessageSquare },
     { href: "/admin/ebooks", label: "E-Books", icon: BookOpen },
+    { href: "/admin/bundles", label: "Bundles", icon: Package },
     { href: "/admin/courses", label: "Courses", icon: GraduationCap },
     { href: "/admin/reports", label: "Reports", icon: BarChart3 },
     { href: "/admin/media", label: "Media Library", icon: Images },

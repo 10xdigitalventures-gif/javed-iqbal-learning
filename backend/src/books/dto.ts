@@ -80,3 +80,24 @@ export class CreateBundleDto {
 export class UpdateBundleDto extends CreateBundleDto {
   @IsOptional() declare title: string;
 }
+
+export class CreateBundleOfferDto {
+  @IsString() bundleId: string;
+  @IsString() name: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsNumber() @Min(0) price?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsInt() @Min(0) accessDurationDays?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) index?: number;
+}
+
+export class UpdateBundleOfferDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsNumber() @Min(0) price?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsInt() @Min(0) accessDurationDays?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) index?: number;
+}

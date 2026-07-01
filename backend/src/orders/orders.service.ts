@@ -52,9 +52,15 @@ export class OrdersService {
       });
       if (!bundle || !bundle.isPublished)
         throw new NotFoundException("Bundle not available");
-      amount = bundle.price;
-      currency = bundle.currency;
-      itemName = bundle.title;
+      let bundleOffer = null;
+      if (dto.offerId) {
+        bundleOffer = await this.prisma.bundleOffer.findFirst({
+          where: { id: dto.offerId, bundleId: bundle.id, isActive: true },
+        });
+      }
+      amount = bundleOffer ? bundleOffer.price : bundle.price;
+      currency = bundleOffer ? bundleOffer.currency : bundle.currency;
+      itemName = bundleOffer ? bundleOffer.name : bundle.title;
       data.bundleId = bundle.id;
     } else if (dto.kind === LearningProductKind.SUBSCRIPTION) {
       if (!dto.planId) throw new BadRequestException("planId is required");
@@ -93,8 +99,6 @@ export class OrdersService {
       });
       if (!community || !community.isActive)
         throw new NotFoundException("Community not available");
-      if (!community.isPaid)
-        throw new BadRequestException("This community is free to join");
       const member = await this.prisma.communityMember.findUnique({
         where: {
           communityId_userId: {
@@ -107,9 +111,23 @@ export class OrdersService {
         throw new BadRequestException(
           "You are already a member of this community",
         );
-      amount = community.price;
-      currency = community.currency;
-      itemName = community.name;
+      let commOffer = null;
+      if (dto.offerId) {
+        commOffer = await this.prisma.communityOffer.findFirst({
+          where: { id: dto.offerId, communityId: community.id, isActive: true },
+        });
+      }
+      if (commOffer) {
+        amount = commOffer.price;
+        currency = commOffer.currency;
+        itemName = commOffer.name;
+      } else {
+        if (!community.isPaid)
+          throw new BadRequestException("This community is free to join");
+        amount = community.price;
+        currency = community.currency;
+        itemName = community.name;
+      }
       data.communityId = community.id;
     } else {
       throw new BadRequestException("Unsupported order kind");

@@ -10,10 +10,12 @@ import { randomUUID } from "crypto";
 import {
   CreateBookDto,
   CreateBundleDto,
+  CreateBundleOfferDto,
   CreateCategoryDto,
   CreateChapterDto,
   UpdateBookDto,
   UpdateBundleDto,
+  UpdateBundleOfferDto,
   UpdateCategoryDto,
 } from "./dto";
 
@@ -833,7 +835,72 @@ export class BooksService {
     }
   }
 
+  // ---- Bundle offers (pricing tiers) ----
+  listBundleOffers(bundleId: string) {
+    return this.prisma.bundleOffer.findMany({
+      where: { bundleId },
+      orderBy: [{ index: "asc" }, { createdAt: "asc" }],
+    });
+  }
+
+  listAllBundleOffers() {
+    return this.prisma.bundleOffer.findMany({
+      where: { isActive: true, bundle: { isPublished: true } },
+      orderBy: [{ index: "asc" }, { createdAt: "asc" }],
+      include: {
+        bundle: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            coverUrl: true,
+            currency: true,
+          },
+        },
+      },
+    });
+  }
+
+  createBundleOffer(dto: CreateBundleOfferDto) {
+    return this.prisma.bundleOffer.create({
+      data: {
+        bundleId: dto.bundleId,
+        name: dto.name,
+        description: dto.description ?? null,
+        price: dto.price ?? 0,
+        currency: dto.currency || "PKR",
+        accessDurationDays: dto.accessDurationDays ?? null,
+        isActive: dto.isActive ?? true,
+        index: dto.index ?? 0,
+      },
+    });
+  }
+
+  async updateBundleOffer(id: string, dto: UpdateBundleOfferDto) {
+    const o = await this.prisma.bundleOffer.findUnique({ where: { id } });
+    if (!o) throw new NotFoundException("Bundle offer not found");
+    return this.prisma.bundleOffer.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        description: dto.description,
+        price: dto.price,
+        currency: dto.currency,
+        accessDurationDays: dto.accessDurationDays,
+        isActive: dto.isActive,
+        index: dto.index,
+      },
+    });
+  }
+
+  async removeBundleOffer(id: string) {
+    const o = await this.prisma.bundleOffer.findUnique({ where: { id } });
+    if (!o) throw new NotFoundException("Bundle offer not found");
+    return this.prisma.bundleOffer.delete({ where: { id } });
+  }
+
   async deleteBundle(id: string) {
+    await this.prisma.bundleOffer.deleteMany({ where: { bundleId: id } });
     await this.prisma.bundleItem.deleteMany({ where: { bundleId: id } });
     await this.prisma.bundle.delete({ where: { id } });
     return { ok: true };

@@ -29,6 +29,7 @@ export default function LibraryScreen() {
   const [courses, setCourses] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
   const [q, setQ] = useState("");
+  const [qc, setQc] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -48,6 +49,13 @@ export default function LibraryScreen() {
   if (loading) return <Loading />;
 
   const term = q.trim().toLowerCase();
+
+  const termC = qc.trim().toLowerCase();
+  const filteredCourses = courses.filter((e: any) => {
+    if (!termC) return true;
+    const c = e.course || e;
+    return (c.title || "").toLowerCase().includes(termC);
+  });
 
   const ownedBooks = books
     .map((row: any) => row.book || row)
@@ -122,11 +130,13 @@ export default function LibraryScreen() {
     <View style={s.wrap}>
       <View style={s.tabs}>
         <Pill
+          fill
           label="Courses"
           active={tab === "courses"}
           onPress={() => setTab("courses")}
         />
         <Pill
+          fill
           label="Books"
           active={tab === "books"}
           onPress={() => setTab("books")}
@@ -134,21 +144,32 @@ export default function LibraryScreen() {
       </View>
 
       {tab === "courses" ? (
-        <FlatList
-          data={courses}
-          keyExtractor={(e: any, i) => e.id || e.courseId || String(i)}
-          renderItem={renderCourse}
-          numColumns={2}
-          columnWrapperStyle={s.col}
-          contentContainerStyle={s.listContent}
-          ListEmptyComponent={
-            <EmptyState
-              icon="school-outline"
-              title="No courses yet"
-              subtitle="Courses you purchase will appear here."
+        <>
+          <View style={s.searchRow}>
+            <TextInput
+              value={qc}
+              onChangeText={setQc}
+              placeholder="Search your courses"
+              placeholderTextColor={colors.muted}
+              style={s.search}
             />
-          }
-        />
+          </View>
+          <FlatList
+            data={filteredCourses}
+            keyExtractor={(e: any, i) => e.id || e.courseId || String(i)}
+            renderItem={renderCourse}
+            numColumns={2}
+            columnWrapperStyle={s.col}
+            contentContainerStyle={s.listContent}
+            ListEmptyComponent={
+              <EmptyState
+                icon="school-outline"
+                title="No courses yet"
+                subtitle="Courses you purchase will appear here."
+              />
+            }
+          />
+        </>
       ) : (
         <>
           <View style={s.searchRow}>
@@ -183,7 +204,12 @@ export default function LibraryScreen() {
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
-  tabs: { flexDirection: "row", paddingHorizontal: spacing.lg, paddingTop: 12 },
+  tabs: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    paddingTop: 12,
+  },
   searchRow: { paddingHorizontal: spacing.lg, paddingTop: 12 },
   search: {
     backgroundColor: colors.card,

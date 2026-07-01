@@ -35,13 +35,11 @@ const CATEGORIES: Cat[] = [
   { key: "audio", label: "Audio Books", icon: "headset", kind: "browse" },
   { key: "courses", label: "Courses", icon: "school", kind: "browse" },
   { key: "community", label: "Community", icon: "people", kind: "browse" },
-  { key: "packages", label: "Packages", icon: "cube", kind: "browse" },
   {
     key: "messaging",
     label: "Messaging",
     icon: "chatbubbles",
-    kind: "link",
-    route: "Messages",
+    kind: "browse",
   },
 ];
 
@@ -55,9 +53,13 @@ export default function ExploreScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [pkgError, setPkgError] = useState<string | null>(null);
   const [bundles, setBundles] = useState<any[]>([]);
+  const [bundleOffers, setBundleOffers] = useState<any[]>([]);
   const [cats, setCats] = useState<any[]>([]);
   const [catFilter, setCatFilter] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [offers, setOffers] = useState<any[]>([]);
+  const [communities, setCommunities] = useState<any[]>([]);
+  const [joined, setJoined] = useState<string[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -66,12 +68,20 @@ export default function ExploreScreen() {
       api("/books/bundles").catch(() => []),
       api("/categories").catch(() => []),
       api("/packages").catch(() => []),
+      api("/courses/offers/all").catch(() => []),
+      api("/communities/offers/all").catch(() => []),
+      api("/communities/mine").catch(() => []),
+      api("/books/bundle-offers/all").catch(() => []),
     ])
-      .then(([b, bn, c, pk]) => {
+      .then(([b, bn, c, pk, of, com, mine, bo]) => {
         setBooks(arr(b));
         setBundles(arr(bn));
         setCats(arr(c));
         setPackages(arr(pk));
+        setOffers(arr(of));
+        setCommunities(arr(com));
+        setBundleOffers(arr(bo));
+        setJoined(arr(mine).map((x: any) => x.id));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -88,11 +98,31 @@ export default function ExploreScreen() {
     setQ("");
   }
 
-  // Courses, Community and Packages are all monetised through packages, so the
-  // Explore tab surfaces buyable package cards inline instead of navigating to
-  // a separate catalog screen.
-  const isPkgCat = (k: string) =>
-    k === "courses" || k === "community" || k === "packages";
+  // Messaging is monetised through packages (text / audio / video consultation
+  // plans). Courses show course offers, Community shows community plans.
+  async function buyCommunityOffer(offer: any) {
+    setPkgError(null);
+    setBusy(offer.id);
+    try {
+      const res = await api("/communities/offers/" + offer.id + "/buy", {
+        method: "POST",
+      });
+      if (res?.requiresPayment && res?.paymentId) {
+        nav.navigate("Checkout", {
+          paymentId: res.paymentId,
+          title: offer.name,
+          amount: Number(res.amount),
+          currency: res.currency,
+        });
+      } else {
+        setJoined((prev) => [...prev, offer.communityId]);
+      }
+    } catch (err: any) {
+      setPkgError(err?.message || "Could not start checkout");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function buyPackage(pkg: any) {
     setPkgError(null);
@@ -192,7 +222,7 @@ export default function ExploreScreen() {
         }}
       />
 
-      {isPkgCat(cat) ? (
+      {cat === "messaging" ? (
         <FlatList
           data={packages}
           keyExtractor={(pk: any) => pk.id}
@@ -202,9 +232,9 @@ export default function ExploreScreen() {
           }
           ListEmptyComponent={
             <EmptyState
-              icon="cube-outline"
-              title="No packages yet"
-              subtitle="Plans and packages will appear here."
+              icon="chatbubbles-outline"
+              title="No messaging plans yet"
+              subtitle="Consultation plans will appear here."
             />
           }
           renderItem={({ item: pk }: { item: any }) => (
@@ -230,6 +260,98 @@ export default function ExploreScreen() {
               </TouchableOpacity>
             </View>
           )}
+        />
+      ) : cat === "courses" ? (
+        <FlatList
+          data={offers}
+          keyExtractor={(o: any) => o.id}
+          contentContainerStyle={s.listContent}
+          ListEmptyComponent={
+            <EmptyState
+              icon="school-outline"
+              title="No course offers yet"
+              subtitle="Course packages will appear here."
+            />
+          }
+          renderItem={({ item: o }: { item: any }) => (
+            <View style={s.pkgCard}>
+              <View style={s.pkgHead}>
+                <Text style={s.pkgName}>{o.name}</Text>
+                <Text style={s.pkgPrice}>
+                  {formatPrice(o.price, o.currency)}
+                </Text>
+              </View>
+              {o.course?.title ? (
+                <Text style={s.pkgCourse}>{o.course.title}</Text>
+              ) : null}
+              {o.description ? (
+                <Text style={s.pkgDesc}>{o.description}</Text>
+              ) : null}
+              <TouchableOpacity
+                style={s.pkgBtn}
+                activeOpacity={0.85}
+                onPress={() =>
+                  nav.navigate("CourseDetail", {
+                    idOrSlug: o.course?.slug || o.courseId,
+                  })
+                }
+              >
+                <Text style={s.pkgBtnText}>View course</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        />
+      ) : cat === "community" ? (
+        <FlatList
+          data={communities}
+          keyExtractor={(cm: any) => cm.id}
+          contentContainerStyle={s.listContent}
+          ListHeaderComponent={
+            pkgError ? <Text style={s.pkgErr}>{pkgError}</Text> : null
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="people-outline"
+              title="No community plans yet"
+              subtitle="Community plans will appear here."
+            />
+          }
+          renderItem={({ item: cm }: { item: any }) => {
+            const isJoined = joined.includes(cm.communityId);
+            const isFree = !cm.price || cm.price <= 0;
+            return (
+              <View style={s.pkgCard}>
+                <View style={s.pkgHead}>
+                  <Text style={s.pkgName}>{cm.name}</Text>
+                  <Text style={s.pkgPrice}>
+                    {isFree ? "Free" : formatPrice(cm.price, cm.currency)}
+                  </Text>
+                </View>
+                {cm.community?.name ? (
+                  <Text style={s.pkgCourse}>{cm.community.name}</Text>
+                ) : null}
+                {cm.description ? (
+                  <Text style={s.pkgDesc}>{cm.description}</Text>
+                ) : null}
+                <TouchableOpacity
+                  style={[s.pkgBtn, isJoined ? s.pkgBtnDisabled : null]}
+                  activeOpacity={0.85}
+                  disabled={isJoined || busy === cm.id}
+                  onPress={() => buyCommunityOffer(cm)}
+                >
+                  <Text style={s.pkgBtnText}>
+                    {isJoined
+                      ? "Joined"
+                      : busy === cm.id
+                        ? "Please wait..."
+                        : isFree
+                          ? "Join"
+                          : "Get this plan"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }}
         />
       ) : (
         <>
@@ -293,7 +415,7 @@ export default function ExploreScreen() {
             </>
           ) : (
             <FlatList
-              data={bundles}
+              data={bundleOffers.length ? bundleOffers : bundles}
               keyExtractor={(b: any) => b.id}
               contentContainerStyle={s.listContent}
               ListEmptyComponent={
@@ -303,32 +425,43 @@ export default function ExploreScreen() {
                   subtitle="Curated collections are coming soon."
                 />
               }
-              renderItem={({ item: bn }: { item: any }) => (
-                <TouchableOpacity
-                  style={s.bundleCard}
-                  activeOpacity={0.85}
-                  onPress={() =>
-                    nav.navigate("BookDetail", {
-                      idOrSlug: bn.slug || bn.id,
-                      type: "bundle",
-                    })
-                  }
-                >
-                  <View style={s.flex1}>
-                    <Text style={s.bundleTitle}>{bn.title}</Text>
-                    <Text style={s.bundleMeta} numberOfLines={2}>
-                      {bn.description || "Book bundle"}
+              renderItem={({ item: bn }: { item: any }) => {
+                const isOffer = !!bn.bundle;
+                const parent = bn.bundle || bn;
+                return (
+                  <TouchableOpacity
+                    style={s.bundleCard}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      nav.navigate("BookDetail", {
+                        idOrSlug: parent.slug || parent.id,
+                        type: "bundle",
+                        offerId: isOffer ? bn.id : undefined,
+                      })
+                    }
+                  >
+                    <View style={s.flex1}>
+                      <Text style={s.bundleTitle}>
+                        {isOffer ? bn.name : bn.title}
+                      </Text>
+                      <Text style={s.bundleMeta} numberOfLines={2}>
+                        {isOffer
+                          ? parent.title
+                          : bn.description || "Book bundle"}
+                      </Text>
+                      {!isOffer ? (
+                        <Text style={s.bundleCount}>
+                          {arr(bn.items).length || bn.bookCount || ""} books
+                          included
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text style={s.bundlePrice}>
+                      {formatPrice(bn.price, bn.currency || parent.currency)}
                     </Text>
-                    <Text style={s.bundleCount}>
-                      {arr(bn.items).length || bn.bookCount || ""} books
-                      included
-                    </Text>
-                  </View>
-                  <Text style={s.bundlePrice}>
-                    {formatPrice(bn.price, bn.currency)}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  </TouchableOpacity>
+                );
+              }}
             />
           )}
         </>
@@ -441,7 +574,14 @@ const s = StyleSheet.create({
     color: colors.brand,
     marginLeft: 12,
   },
+  pkgCourse: {
+    fontSize: 13,
+    color: colors.brand,
+    fontWeight: "700",
+    marginTop: 6,
+  },
   pkgDesc: { fontSize: 13, color: colors.muted, marginTop: 6, lineHeight: 18 },
+  pkgBtnDisabled: { backgroundColor: colors.muted },
   pkgBtn: {
     marginTop: 14,
     backgroundColor: colors.brand,

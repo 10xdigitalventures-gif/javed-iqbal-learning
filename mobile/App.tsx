@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { AppState } from "react-native";
+import {
+  AppState,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  Text,
+} from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -13,6 +19,7 @@ import { AuthProvider, useAuth } from "./src/auth";
 import { Loading } from "./src/components";
 import { colors } from "./src/theme";
 import { syncActivity } from "./src/activity";
+import { api } from "./src/api";
 
 import HomeScreen from "./src/screens/HomeScreen";
 import ExploreScreen from "./src/screens/ExploreScreen";
@@ -21,6 +28,8 @@ import CommunityScreen from "./src/screens/CommunityScreen";
 import MessagesScreen from "./src/screens/MessagesScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
 import NotificationSettingsScreen from "./src/screens/NotificationSettingsScreen";
+import NotificationsScreen from "./src/screens/NotificationsScreen";
+import SearchScreen from "./src/screens/SearchScreen";
 import DevicesScreen from "./src/screens/DevicesScreen";
 import BookDetailScreen from "./src/screens/BookDetailScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
@@ -50,6 +59,11 @@ const brandHeader = {
   headerTitleStyle: { fontWeight: "700" as const },
 } as const;
 
+// Instant screen transitions so navigating feels immediate (no slide delay).
+const stackScreenOptions = { ...brandHeader, animation: "none" } as const;
+const notifInboxOpts = { ...brandHeader, title: "Notifications" } as const;
+const searchOpts = { ...brandHeader, title: "Search" } as const;
+
 const bookDetailOpts = { title: "Book" } as const;
 const audioBooksOpts = { ...brandHeader, title: "Audio Books" } as const;
 const checkoutOpts = { title: "Checkout" } as const;
@@ -59,6 +73,7 @@ const certificatesOpts = { ...brandHeader, title: "My Certificates" } as const;
 const packagesOpts = { ...brandHeader, title: "Packages" } as const;
 const meetingsOpts = { ...brandHeader, title: "My meetings" } as const;
 const consultantsOpts = { ...brandHeader, title: "Find consultants" } as const;
+const profileOpts = { ...brandHeader, title: "Profile" } as const;
 
 const TAB_ICONS: Record<string, string> = {
   Home: "home",
@@ -68,6 +83,123 @@ const TAB_ICONS: Record<string, string> = {
   Messages: "chatbubbles",
   Profile: "person",
 };
+
+function NotifBell({ navigation }: any) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const loadCount = () =>
+      api("/notifications/unread-count")
+        .then((n: any) => {
+          if (alive) setCount(typeof n === "number" ? n : n?.count || 0);
+        })
+        .catch(() => undefined);
+    loadCount();
+    const timer = setInterval(loadCount, 30000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+  return (
+    <TouchableOpacity
+      onPress={() => navigation.navigate("Notifications")}
+      style={bell.btn}
+      activeOpacity={0.7}
+    >
+      <Ionicons name="notifications-outline" size={22} color={colors.text} />
+      {count > 0 ? (
+        <View style={bell.badge}>
+          <Text style={bell.badgeText}>{count > 99 ? "99+" : count}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
+function HeaderIcons({ navigation }: any) {
+  return (
+    <View style={bell.row}>
+      <TouchableOpacity
+        onPress={() => navigation.navigate("Search")}
+        style={bell.iconBtn}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="search-outline" size={22} color={colors.text} />
+      </TouchableOpacity>
+      <NotifBell navigation={navigation} />
+    </View>
+  );
+}
+
+const bell = StyleSheet.create({
+  row: { flexDirection: "row", alignItems: "center" },
+  iconBtn: { paddingHorizontal: 6, paddingVertical: 6 },
+  btn: { paddingHorizontal: 8, paddingVertical: 6 },
+  badge: {
+    position: "absolute",
+    right: 8,
+    top: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+});
+
+function ProfileAvatarButton({ navigation }: any) {
+  const { user } = useAuth();
+  const initials = (user?.name || "?")
+    .trim()
+    .split(" ")
+    .map((p: string) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return (
+    <TouchableOpacity
+      onPress={() => navigation.navigate("Profile")}
+      style={homeHead.avatarBtn}
+      activeOpacity={0.7}
+    >
+      <View style={homeHead.avatar}>
+        <Text style={homeHead.avatarText}>{initials || "?"}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function HomeHeaderTitle() {
+  const { user } = useAuth();
+  const first = (user?.name || "").trim().split(" ")[0] || "there";
+  return (
+    <View style={homeHead.titleWrap}>
+      <Text style={homeHead.welcome}>Welcome</Text>
+      <Text style={homeHead.name}>{first}</Text>
+    </View>
+  );
+}
+
+const homeHead = StyleSheet.create({
+  avatarBtn: { paddingLeft: 16, paddingRight: 4 },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  titleWrap: { justifyContent: "center" },
+  welcome: { fontSize: 12, color: colors.muted, fontWeight: "600" },
+  name: { fontSize: 17, color: colors.text, fontWeight: "800" },
+});
 
 function Tabs() {
   // Add the device's bottom safe-area inset (home indicator / gesture bar) so
@@ -82,10 +214,11 @@ function Tabs() {
   const bottomInset = Math.max(insets.bottom, 16) + 8;
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      screenOptions={({ route, navigation }) => ({
         headerStyle: { backgroundColor: colors.card },
         headerTitleStyle: { fontWeight: "700", color: colors.text },
         headerShadowVisible: false,
+        headerRight: () => <HeaderIcons navigation={navigation} />,
         tabBarActiveTintColor: colors.brand,
         tabBarInactiveTintColor: colors.muted,
         tabBarStyle: {
@@ -103,12 +236,19 @@ function Tabs() {
         },
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Explore" component={ExploreScreen as any} />
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={({ navigation }) => ({
+          headerTitleAlign: "left",
+          headerTitle: () => <HomeHeaderTitle />,
+          headerLeft: () => <ProfileAvatarButton navigation={navigation} />,
+        })}
+      />
       <Tab.Screen name="Library" component={LibraryScreen} />
+      <Tab.Screen name="Explore" component={ExploreScreen as any} />
       <Tab.Screen name="Community" component={CommunityScreen} />
       <Tab.Screen name="Messages" component={MessagesScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
@@ -134,7 +274,7 @@ function Root() {
 
   if (loading || minSplash) return <Loading />;
   return (
-    <Stack.Navigator screenOptions={brandHeader}>
+    <Stack.Navigator screenOptions={stackScreenOptions}>
       {user ? (
         <>
           <Stack.Screen name="Tabs" component={Tabs} options={noHeader} />
@@ -170,9 +310,24 @@ function Root() {
           />
           <Stack.Screen name="Chat" component={ChatScreen} />
           <Stack.Screen
+            name="Profile"
+            component={ProfileScreen}
+            options={profileOpts}
+          />
+          <Stack.Screen
             name="NotificationSettings"
             component={NotificationSettingsScreen}
             options={{ title: "Notifications" } as any}
+          />
+          <Stack.Screen
+            name="Notifications"
+            component={NotificationsScreen}
+            options={notifInboxOpts}
+          />
+          <Stack.Screen
+            name="Search"
+            component={SearchScreen}
+            options={searchOpts}
           />
           <Stack.Screen
             name="Devices"

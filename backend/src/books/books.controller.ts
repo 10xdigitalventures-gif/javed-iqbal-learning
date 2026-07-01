@@ -22,10 +22,12 @@ import { BooksService } from "./books.service";
 import {
   CreateBookDto,
   CreateBundleDto,
+  CreateBundleOfferDto,
   CreateCategoryDto,
   CreateChapterDto,
   UpdateBookDto,
   UpdateBundleDto,
+  UpdateBundleOfferDto,
   UpdateCategoryDto,
 } from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -99,6 +101,38 @@ export class BooksController {
   @Roles(Role.ADMIN)
   deleteBundle(@Param("id") id: string) {
     return this.service.deleteBundle(id);
+  }
+
+  // ---- Bundle offers (pricing tiers) ----
+  @Get("books/bundle-offers/all")
+  listAllBundleOffers() {
+    return this.service.listAllBundleOffers();
+  }
+
+  @Post("books/bundle-offers")
+  @Roles(Role.ADMIN)
+  createBundleOffer(@Body() dto: CreateBundleOfferDto) {
+    return this.service.createBundleOffer(dto);
+  }
+
+  @Patch("books/bundle-offers/:id")
+  @Roles(Role.ADMIN)
+  updateBundleOffer(
+    @Param("id") id: string,
+    @Body() dto: UpdateBundleOfferDto,
+  ) {
+    return this.service.updateBundleOffer(id, dto);
+  }
+
+  @Delete("books/bundle-offers/:id")
+  @Roles(Role.ADMIN)
+  removeBundleOffer(@Param("id") id: string) {
+    return this.service.removeBundleOffer(id);
+  }
+
+  @Get("books/bundles/:id/offers")
+  listBundleOffers(@Param("id") id: string) {
+    return this.service.listBundleOffers(id);
   }
 
   // ---- Books ----

@@ -27,7 +27,7 @@ export async function registerForPush(): Promise<string | null> {
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {
         name: "default",
-        importance: Notifications.AndroidImportance.DEFAULT,
+        importance: Notifications.AndroidImportance.MAX,
       });
     }
 
@@ -52,7 +52,10 @@ export async function registerForPush(): Promise<string | null> {
 
 export async function clearPush() {
   try {
-    await api("/users/me/push-token", { method: "POST", body: { token: null } });
+    await api("/users/me/push-token", {
+      method: "POST",
+      body: { token: null },
+    });
   } catch {
     // best-effort
   }

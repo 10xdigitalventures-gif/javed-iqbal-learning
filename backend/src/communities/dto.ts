@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -27,6 +28,27 @@ export class CreateCommunityDto {
 }
 
 export class UpdateCommunityDto extends CreateCommunityDto {}
+
+export class CreateCommunityOfferDto {
+  @IsString() communityId: string;
+  @IsString() name: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsNumber() price?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsInt() accessDurationDays?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() index?: number;
+}
+
+export class UpdateCommunityOfferDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsNumber() price?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsInt() accessDurationDays?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() index?: number;
+}
 
 export class CreatePostDto {
   @IsString()

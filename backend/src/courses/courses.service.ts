@@ -1329,6 +1329,25 @@ export class CoursesService {
     });
   }
 
+  // All active offers across published courses (for the mobile Explore tab).
+  async listAllOffers() {
+    return this.prisma.courseOffer.findMany({
+      where: { isActive: true, course: { isPublished: true } },
+      orderBy: [{ index: "asc" }, { createdAt: "asc" }],
+      include: {
+        course: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            coverUrl: true,
+            currency: true,
+          },
+        },
+      },
+    });
+  }
+
   async createOffer(dto: CreateOfferDto) {
     return this.prisma.courseOffer.create({
       data: {

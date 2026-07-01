@@ -397,6 +397,7 @@ model Community {
   members CommunityMember[]
   posts   CommunityPost[]
   orders  Order[]
+  offers  CommunityOffer[]
 }
 
 model CommunityMember {
@@ -666,6 +667,7 @@ model Bundle {
 
   items  BundleItem[]
   orders Order[]
+  offers BundleOffer[]
 }
 
 model BundleItem {
@@ -1419,4 +1421,45 @@ model ScheduledNotification {
   updatedAt    DateTime  @updatedAt
 
   @@index([active, nextRunAt])
+}
+
+// A purchasable ACCESS PLAN (pricing tier) for one community, mirroring
+// CourseOffer. The same community can be sold via several plans, each with its
+// own name/price/access window. Buying a plan grants membership.
+model CommunityOffer {
+  id                 String   @id @default(cuid())
+  communityId        String
+  name               String
+  description        String?
+  price              Float    @default(0)
+  currency           String   @default("PKR")
+  accessDurationDays Int?
+  isActive           Boolean  @default(true)
+  index              Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([communityId])
+}
+
+// A purchasable ACCESS OFFER (pricing tier) for one book bundle, mirroring
+// CourseOffer. Lets a bundle be sold at multiple prices/tiers.
+model BundleOffer {
+  id                 String   @id @default(cuid())
+  bundleId           String
+  name               String
+  description        String?
+  price              Float    @default(0)
+  currency           String   @default("PKR")
+  accessDurationDays Int?
+  isActive           Boolean  @default(true)
+  index              Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  bundle Bundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+
+  @@index([bundleId])
 }
