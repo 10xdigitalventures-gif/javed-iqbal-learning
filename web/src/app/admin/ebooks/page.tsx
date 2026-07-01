@@ -674,7 +674,6 @@ export default function EbooksAdminPage() {
                   label="Title (Urdu, optional)"
                   className="font-urdu"
                   dir="rtl"
-                  dir="rtl"
                   value={form.titleUrdu}
                   onChange={(e) =>
                     setForm({ ...form, titleUrdu: e.target.value })
@@ -746,7 +745,6 @@ export default function EbooksAdminPage() {
                 label="Description (Urdu, optional)"
                 className="font-urdu"
                 dir="rtl"
-                dir="rtl"
                 rows={3}
                 value={form.descriptionUrdu}
                 onChange={(e) =>
@@ -783,7 +781,6 @@ export default function EbooksAdminPage() {
               <Textarea
                 label="Full E-Book Text Content (Urdu, optional)"
                 className="font-urdu"
-                dir="rtl"
                 dir="rtl"
                 rows={8}
                 placeholder="Urdu version of the full single-file book text (optional). Readers get a language toggle when this is filled."
