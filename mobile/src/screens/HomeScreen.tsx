@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from "react";
 import {
-  Image,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -9,10 +8,9 @@ import {
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { api } from "../api";
-import { useAuth } from "../auth";
+import { touchStreak, StreakState } from "../streak";
 import { Loading } from "../components";
 import { colors, radius, spacing } from "../theme";
-import { brandingSource } from "../branding";
 import {
   BookCover,
   EmptyState,
@@ -25,13 +23,11 @@ const arr = (x: any) => (Array.isArray(x) ? x : x?.items || x?.data || []);
 
 export default function HomeScreen() {
   const nav = useNavigation<any>();
-  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [books, setBooks] = useState<any[]>([]);
   const [bundles, setBundles] = useState<any[]>([]);
   const [cont, setCont] = useState<any[]>([]);
-  const [sub, setSub] = useState<any>(null);
-  const [brandMode, setBrandMode] = useState<string>("picture");
+  const [streak, setStreak] = useState<StreakState | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -39,17 +35,16 @@ export default function HomeScreen() {
       api("/books").catch(() => []),
       api("/books/bundles").catch(() => []),
       api("/library/continue").catch(() => []),
-      api("/subscriptions/me").catch(() => null),
-      api("/settings").catch(() => null),
     ])
-      .then(([b, bn, c, s, settings]: any[]) => {
+      .then(([b, bn, c]: any[]) => {
         setBooks(arr(b));
         setBundles(arr(bn));
         setCont(arr(c));
-        setSub(s);
-        if (settings?.brandingMode) setBrandMode(settings.brandingMode);
       })
       .finally(() => setLoading(false));
+    touchStreak()
+      .then(setStreak)
+      .catch(() => undefined);
   }, []);
 
   useFocusEffect(load);
@@ -66,31 +61,50 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={s.wrap} contentContainerStyle={s.content}>
-      <View style={s.brandRow}>
-        <Image source={brandingSource(brandMode)} style={s.brandLogo} />
-        <Text style={s.brandName}>Prof. Dr. Javed Iqbal</Text>
-      </View>
-      <Text style={s.hello}>Assalam-o-Alaikum,</Text>
-      <Text style={s.name}>{user?.name || "Reader"}</Text>
-      <Text style={s.tagline}>
-        Continue your learning journey with Prof. Dr. Javed Iqbal.
-      </Text>
-
-      {sub ? (
-        <View style={s.subBanner}>
-          <View style={s.subIcon}>
-            <Text style={s.subStar}>★</Text>
-          </View>
+      <View style={s.streakCard}>
+        <View style={s.streakTop}>
           <View style={s.flex1}>
-            <Text style={s.subTitle}>{sub.plan?.name || "Subscription"}</Text>
-            <Text style={s.subSub}>
-              {sub.expiresAt
-                ? "Active until " + new Date(sub.expiresAt).toLocaleDateString()
-                : "Lifetime access"}
+            <Text style={s.streakCount}>
+              {streak?.count || 1}
+              <Text style={s.streakUnit}>
+                {" "}
+                {(streak?.count || 1) === 1 ? "day" : "days"} streak
+              </Text>
+            </Text>
+            <Text style={s.streakSub}>
+              {(streak?.count || 1) > 1
+                ? "Keep it up — read a little every day!"
+                : "Read today to start your streak!"}
             </Text>
           </View>
+          <View style={s.streakFlame}>
+            <Text style={s.streakFlameText}>🔥</Text>
+          </View>
         </View>
-      ) : null}
+        <View style={s.streakWeek}>
+          {(
+            streak?.week ||
+            ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => ({
+              label,
+              active: false,
+              today: false,
+            }))
+          ).map((d, i) => (
+            <View key={i} style={s.streakDay}>
+              <View
+                style={[
+                  s.streakDot,
+                  d.active ? s.streakDotActive : null,
+                  d.today ? s.streakDotToday : null,
+                ]}
+              >
+                {d.active ? <Text style={s.streakTick}>✓</Text> : null}
+              </View>
+              <Text style={s.streakDayLabel}>{d.label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
 
       {continueItem ? (
         <>
@@ -224,7 +238,12 @@ export default function HomeScreen() {
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, paddingBottom: 32 },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 14,
+  },
   brandLogo: {
     width: 40,
     height: 40,
@@ -235,6 +254,44 @@ const s = StyleSheet.create({
   },
   brandName: { fontSize: 15, fontWeight: "700", color: colors.text },
   flex1: { flex: 1 },
+  streakCard: {
+    backgroundColor: colors.black,
+    borderRadius: radius.lg,
+    padding: 16,
+    marginBottom: spacing.lg,
+  },
+  streakTop: { flexDirection: "row", alignItems: "center" },
+  streakCount: { color: "#fff", fontSize: 26, fontWeight: "900" },
+  streakUnit: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  streakSub: { color: "#C9C9D2", fontSize: 12, marginTop: 4 },
+  streakFlame: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  streakFlameText: { fontSize: 22 },
+  streakWeek: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 16,
+  },
+  streakDay: { alignItems: "center", flex: 1 },
+  streakDot: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "#3A3A44",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  streakDotActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  streakDotToday: { borderColor: "#fff", borderWidth: 2 },
+  streakTick: { color: "#fff", fontSize: 14, fontWeight: "900" },
+  streakDayLabel: { color: "#C9C9D2", fontSize: 11, marginTop: 6 },
   hello: { fontSize: 14, color: colors.muted },
   name: { fontSize: 24, fontWeight: "800", color: colors.text, marginTop: 2 },
   tagline: { fontSize: 13, color: colors.muted, marginTop: 4, lineHeight: 19 },

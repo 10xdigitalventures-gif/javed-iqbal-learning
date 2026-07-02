@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { api } from "../api";
 import { Button, Field } from "../components";
+import { formatPrice } from "../ui";
 import { colors, radius, spacing } from "../theme";
 
 // Four ways to pay for a printed copy. The first three reuse the gateways that
@@ -48,6 +49,9 @@ export default function HardCopyOrderScreen() {
   const route = useRoute<any>();
   const bookId: string | undefined = route.params?.bookId;
   const bookTitle: string | undefined = route.params?.title;
+  const unitPrice: number | null =
+    typeof route.params?.price === "number" ? route.params.price : null;
+  const currency: string = route.params?.currency || "PKR";
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -56,6 +60,9 @@ export default function HardCopyOrderScreen() {
   const [quantity, setQuantity] = useState("1");
   const [method, setMethod] = useState("cod");
   const [busy, setBusy] = useState(false);
+
+  const qtyNum = Math.max(1, parseInt(quantity, 10) || 1);
+  const total = unitPrice != null ? unitPrice * qtyNum : null;
 
   async function submit() {
     if (!name.trim() || !phone.trim() || !address.trim() || !city.trim()) {
@@ -72,8 +79,17 @@ export default function HardCopyOrderScreen() {
           phone: phone.trim(),
           address: address.trim(),
           city: city.trim(),
-          quantity: Math.max(1, parseInt(quantity, 10) || 1),
+          quantity: qtyNum,
           paymentMethod: method,
+          notes:
+            unitPrice != null
+              ? "Quoted " +
+                formatPrice(unitPrice, currency) +
+                " x " +
+                qtyNum +
+                " = " +
+                formatPrice(total || 0, currency)
+              : undefined,
         },
       });
       const picked = PAY_METHODS.find((m) => m.key === method);
@@ -101,6 +117,11 @@ export default function HardCopyOrderScreen() {
         <View style={s.banner}>
           <Text style={s.bannerLabel}>Ordering hard copy of</Text>
           <Text style={s.bannerTitle}>{bookTitle}</Text>
+          {unitPrice != null ? (
+            <Text style={s.bannerPrice}>
+              {formatPrice(unitPrice, currency)} per copy
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -167,8 +188,21 @@ export default function HardCopyOrderScreen() {
         );
       })}
 
+      {total != null ? (
+        <View style={s.totalRow}>
+          <Text style={s.totalLabel}>Total ({qtyNum} copies)</Text>
+          <Text style={s.totalValue}>{formatPrice(total, currency)}</Text>
+        </View>
+      ) : null}
+
       <Button
-        title={busy ? "Placing order\u2026" : "Place order"}
+        title={
+          busy
+            ? "Placing order\u2026"
+            : total != null
+              ? "Place order \u2013 " + formatPrice(total, currency)
+              : "Place order"
+        }
         onPress={submit}
         disabled={busy}
       />
@@ -192,6 +226,23 @@ const s = StyleSheet.create({
     color: colors.text,
     marginTop: 2,
   },
+  bannerPrice: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.brand,
+    marginTop: 6,
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    marginBottom: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  totalLabel: { fontSize: 14, color: colors.muted, fontWeight: "700" },
+  totalValue: { fontSize: 18, fontWeight: "900", color: colors.text },
   stepLabel: {
     fontSize: 14,
     fontWeight: "800",

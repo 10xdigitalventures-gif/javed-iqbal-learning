@@ -185,12 +185,22 @@ export default function BookDetailScreen() {
               <View style={s.gap}>
                 <View style={s.flex1}>
                   <Button
-                    title="Hard copy"
+                    title={
+                      typeof item.hardCopyPrice === "number"
+                        ? "Hard copy – " +
+                          formatPrice(item.hardCopyPrice, item.currency)
+                        : "Hard copy"
+                    }
                     variant="outline"
                     onPress={() =>
                       nav.navigate("HardCopyOrder", {
                         bookId: item.id,
                         title: item.title,
+                        price:
+                          typeof item.hardCopyPrice === "number"
+                            ? item.hardCopyPrice
+                            : null,
+                        currency: item.currency,
                       })
                     }
                   />

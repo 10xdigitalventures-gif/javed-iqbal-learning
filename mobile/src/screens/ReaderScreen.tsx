@@ -25,7 +25,13 @@ import {
 import { trackEvent } from "../activity";
 import { useContentProtection } from "../protect";
 
-type Chapter = { id: string; index: number; title: string; titleUrdu?: string; isFree?: boolean };
+type Chapter = {
+  id: string;
+  index: number;
+  title: string;
+  titleUrdu?: string;
+  isFree?: boolean;
+};
 type ThemeName = "light" | "sepia" | "dark";
 type AiMsg = { role: "user" | "assistant"; content: string };
 type SavedTab = "bookmarks" | "notes" | "highlights";
@@ -151,6 +157,7 @@ export default function ReaderScreen() {
   const [aiMsgs, setAiMsgs] = useState<AiMsg[]>([]);
   const [aiInput, setAiInput] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiName, setAiName] = useState("Hawwa");
 
   const startRef = useRef(Date.now());
   const scrollRef = useRef<ScrollView>(null);
@@ -160,6 +167,15 @@ export default function ReaderScreen() {
     (chapterId: string | null) => bookId + "::" + (chapterId || "main"),
     [bookId],
   );
+
+  // Load the admin-configured AI name once (falls back to "Hawwa").
+  useEffect(() => {
+    api("/settings")
+      .then((sx: any) => {
+        if (sx?.aiName) setAiName(String(sx.aiName));
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Load persisted appearance settings once.
   useEffect(() => {
@@ -209,7 +225,11 @@ export default function ReaderScreen() {
   }
 
   const fetchChapter = useCallback(
-    async (chapterId: string | null, chapterIndex: number, langOverride?: string) => {
+    async (
+      chapterId: string | null,
+      chapterIndex: number,
+      langOverride?: string,
+    ) => {
       const activeLang = langOverride ?? lang;
       if (preview) {
         const data = await api("/books/" + bookId + "/preview").catch(
@@ -407,7 +427,9 @@ export default function ReaderScreen() {
         {
           role: "assistant",
           content:
-            "Salam! Main Hawwa hoon — is kitaab ko parhne me aap ki madad ke " +
+            "Salam! Main " +
+            aiName +
+            " hoon — is kitaab ko parhne me aap ki madad ke " +
             "liye. Is chapter ke baare me kuch bhi poochein: khulasa, mushkil " +
             "alfaaz ka matlab, ya koi sawal.",
         },
@@ -449,7 +471,10 @@ export default function ReaderScreen() {
       ]);
     } finally {
       setAiBusy(false);
-      setTimeout(() => aiScrollRef.current?.scrollToEnd({ animated: true }), 60);
+      setTimeout(
+        () => aiScrollRef.current?.scrollToEnd({ animated: true }),
+        60,
+      );
     }
   }
 
@@ -490,9 +515,18 @@ export default function ReaderScreen() {
                 fetchChapter(chapters[idx]?.id ?? null, idx, next);
               }}
               hitSlop={6}
-              style={[s.topBtn, s.langBtn, lang === "ur" ? s.langBtnActive : null]}
+              style={[
+                s.topBtn,
+                s.langBtn,
+                lang === "ur" ? s.langBtnActive : null,
+              ]}
             >
-              <Text style={[s.langBtnText, lang === "ur" ? s.langBtnTextActive : { color: th.muted }]}>
+              <Text
+                style={[
+                  s.langBtnText,
+                  lang === "ur" ? s.langBtnTextActive : { color: th.muted },
+                ]}
+              >
                 {lang === "ur" ? "EN" : "UR"}
               </Text>
             </TouchableOpacity>
@@ -555,7 +589,9 @@ export default function ReaderScreen() {
         {locked ? (
           <View style={s.lockedBox}>
             <Ionicons name="lock-closed" size={40} color={colors.brand} />
-            <Text style={[s.lockedTitle, { color: th.text }]}>Chapter Locked</Text>
+            <Text style={[s.lockedTitle, { color: th.text }]}>
+              Chapter Locked
+            </Text>
             <Text style={[s.lockedSub, { color: th.muted }]}>
               Purchase this book to read this chapter.
             </Text>
@@ -673,7 +709,8 @@ export default function ReaderScreen() {
                     ]}
                     numberOfLines={2}
                   >
-                    {i + 1}. {lang === "ur" && c.titleUrdu ? c.titleUrdu : c.title}
+                    {i + 1}.{" "}
+                    {lang === "ur" && c.titleUrdu ? c.titleUrdu : c.title}
                   </Text>
                   <View style={s.chapterRowRight}>
                     {c.isFree ? (
@@ -806,10 +843,7 @@ export default function ReaderScreen() {
             />
 
             {savedLoading ? (
-              <ActivityIndicator
-                color={colors.brand}
-                style={s.savedLoading}
-              />
+              <ActivityIndicator color={colors.brand} style={s.savedLoading} />
             ) : savedItems.length === 0 ? (
               <Text style={[s.savedEmpty, { color: th.muted }]}>
                 Nothing here yet.
@@ -872,10 +906,7 @@ export default function ReaderScreen() {
               onChangeText={setNoteText}
               placeholder="Write a note for this chapter..."
               placeholderTextColor={th.muted}
-              style={[
-                s.noteInput,
-                { borderColor: th.border, color: th.text },
-              ]}
+              style={[s.noteInput, { borderColor: th.border, color: th.text }]}
               multiline
             />
             <View style={s.noteActions}>
@@ -909,7 +940,9 @@ export default function ReaderScreen() {
                     <Ionicons name="sparkles" size={16} color="#fff" />
                   </View>
                   <View>
-                    <Text style={[s.sheetTitle, { color: th.text }]}>Hawwa</Text>
+                    <Text style={[s.sheetTitle, { color: th.text }]}>
+                      {aiName}
+                    </Text>
                     <Text style={[s.aiSub, { color: th.muted }]}>
                       Reading companion
                     </Text>
@@ -949,7 +982,9 @@ export default function ReaderScreen() {
                   );
                 })}
                 {aiBusy ? (
-                  <View style={[s.bubble, s.bubbleAi, { backgroundColor: th.sub }]}>
+                  <View
+                    style={[s.bubble, s.bubbleAi, { backgroundColor: th.sub }]}
+                  >
                     <ActivityIndicator color={colors.brand} size="small" />
                   </View>
                 ) : null}
@@ -959,7 +994,7 @@ export default function ReaderScreen() {
                 <TextInput
                   value={aiInput}
                   onChangeText={setAiInput}
-                  placeholder="Ask Hawwa about this chapter..."
+                  placeholder={`Ask ${aiName} about this chapter...`}
                   placeholderTextColor={th.muted}
                   style={[
                     s.aiInput,
@@ -969,7 +1004,10 @@ export default function ReaderScreen() {
                   onSubmitEditing={askHawwa}
                 />
                 <TouchableOpacity
-                  style={[s.aiSend, aiBusy || !aiInput.trim() ? s.aiSendOff : null]}
+                  style={[
+                    s.aiSend,
+                    aiBusy || !aiInput.trim() ? s.aiSendOff : null,
+                  ]}
                   onPress={askHawwa}
                   disabled={aiBusy || !aiInput.trim()}
                 >
@@ -1297,8 +1335,18 @@ const s = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 80,
   },
-  lockedTitle: { fontSize: 18, fontWeight: "800", marginTop: 16, color: colors.text },
-  lockedSub: { fontSize: 14, color: colors.muted, marginTop: 8, textAlign: "center" },
+  lockedTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 16,
+    color: colors.text,
+  },
+  lockedSub: {
+    fontSize: 14,
+    color: colors.muted,
+    marginTop: 8,
+    textAlign: "center",
+  },
   chapterRowRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   freeBadge: {
     backgroundColor: "#dcfce7",

@@ -110,7 +110,7 @@ export default function LibraryScreen() {
       onPress={() => nav.navigate("BookDetail", { idOrSlug: b.slug || b.id })}
     >
       <View>
-        <BookCover url={b.coverUrl} title={b.title} size="md" />
+        <BookCover url={b.coverUrl} title={b.title} size="md" fill />
         {isAudio(b) ? (
           <View style={s.audioTag}>
             <Ionicons name="headset" size={12} color="#fff" />
@@ -221,7 +221,7 @@ const s = StyleSheet.create({
     color: colors.text,
   },
   listContent: { padding: spacing.lg, paddingBottom: 32 },
-  col: { justifyContent: "space-between" },
+  col: { justifyContent: "space-between", alignItems: "flex-start" },
   gridItem: { width: "48%", marginBottom: 18 },
   title: { fontSize: 14, fontWeight: "700", color: colors.text, marginTop: 8 },
   author: { fontSize: 12, color: colors.muted, marginTop: 2 },

@@ -13,6 +13,17 @@ const DEFAULTS: Record<string, string> = {
   // In-app branding logo shown inside the apps: "picture" (Prof. Dr. Javed
   // Iqbal photo) or "icon" (app monogram). Admin-switchable, global.
   brandingMode: "picture",
+  // Hawwa AI study companion — admin-configurable name & personality.
+  // Public so the apps can display the chosen name. Provider + API key live in
+  // the secret env group below.
+  aiName: "Hawwa",
+  aiPersonality:
+    "Tone: warm, encouraging and respectful. " +
+    "Style: concise; explains ideas in simple language with short examples. " +
+    "Language: mirrors the reader — replies in Roman Urdu or Urdu when they do. " +
+    "Focus: stays on the current book and chapter and never invents facts beyond the text. " +
+    "Extras: when helpful, offers a short summary, key terms, and one reflection question.",
+  aiEnabled: "true",
 };
 
 // Sensitive, environment-style configuration the admin can manage from the
@@ -30,6 +41,20 @@ export type EnvGroup = {
 };
 
 const ENV_GROUPS: EnvGroup[] = [
+  {
+    key: "ai",
+    title: "Hawwa AI provider",
+    hint: 'Pick the engine for Hawwa. AI_PROVIDER accepts "openai", "openrouter" or "gemini". Leave AI_BASE_URL blank to use the provider default.',
+    fields: [
+      { key: "AI_PROVIDER", label: "Provider (openai / openrouter / gemini)" },
+      { key: "AI_API_KEY", label: "API key", secret: true },
+      {
+        key: "AI_MODEL",
+        label: "Model (e.g. gpt-4o-mini, openai/gpt-4o-mini, gemini-1.5-flash)",
+      },
+      { key: "AI_BASE_URL", label: "API base URL (optional override)" },
+    ],
+  },
   {
     key: "payment",
     title: "Payment gateways",

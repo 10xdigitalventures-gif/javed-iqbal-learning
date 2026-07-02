@@ -85,13 +85,18 @@ export function BookCover({
   url,
   title,
   size = "md",
+  fill = false,
 }: {
   url?: string | null;
   title: string;
   size?: "sm" | "md" | "lg";
+  // When true the cover fills its container width and keeps a book aspect
+  // ratio (used for balanced 2-per-row grids that must be exactly 50/50).
+  fill?: boolean;
 }) {
-  const dims =
-    size === "lg"
+  const dims: any = fill
+    ? { width: "100%", aspectRatio: 104 / 150 }
+    : size === "lg"
       ? { width: 132, height: 190 }
       : size === "sm"
         ? { width: 56, height: 80 }
