@@ -38,6 +38,22 @@ const REACTION_EMOJIS = [
   "\uD83D\uDE4F",
 ];
 
+// Compact "remaining credits" summary for the quota banner.
+function fmtAllowance(a: any): string {
+  const part = (label: string, ch: any) => {
+    if (!ch || !ch.allowed) return label + " 0";
+    if (ch.unlimited) return label + " ∞";
+    return label + " " + (ch.remaining ?? 0);
+  };
+  return (
+    part("Text", a.text) +
+    "  ·  " +
+    part("Audio", a.audio) +
+    "  ·  " +
+    part("Video", a.video)
+  );
+}
+
 function previewText(m: any): string {
   if (!m) return "";
   if (m.type === "TEXT") return m.body || "";
@@ -181,6 +197,16 @@ export default function ChatScreen({ route, navigation }: any) {
   const [allowance, setAllowance] = useState<any>(null);
   const [consultantId, setConsultantId] = useState<string | null>(null);
 
+  // Per-message limits are configured per package in the admin panel and
+  // delivered through the allowance endpoint; fall back to app defaults.
+  const audioMaxSec: number = allowance?.limits?.audioSec ?? AUDIO_MAX_SEC;
+  const videoMaxSec: number = allowance?.limits?.videoSec ?? VIDEO_MAX_SEC;
+  const textWordLimit: number | null = allowance?.limits?.textWordLimit ?? null;
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [fbRating, setFbRating] = useState(0);
+  const [fbComment, setFbComment] = useState("");
+  const [fbSubmitting, setFbSubmitting] = useState(false);
+
   useEffect(() => {
     navigation.setOptions({ title: peerName || "Chat" });
   }, [peerName]);
@@ -190,6 +216,17 @@ export default function ChatScreen({ route, navigation }: any) {
       const convo = await api(`/conversations/${conversationId}`);
       setMessages(convo.messages || []);
       if (convo.consultantId) setConsultantId(convo.consultantId);
+      // Book a Chat: once the consultant has responded, prompt the client for
+      // feedback (reading the response auto-closes the consultation server-side).
+      const cMode = convo.purchase?.consultationMode || "CHAT";
+      if (
+        user?.role === "CLIENT" &&
+        cMode === "SINGLE" &&
+        convo.status === "RESPONSE_SENT" &&
+        convo.feedbackRating == null
+      ) {
+        setShowFeedback(true);
+      }
       // Clients see remaining package credits; refresh them so the composer
       // can prompt a purchase the moment they run out.
       if (user?.role === "CLIENT" && convo.consultantId) {
@@ -199,6 +236,24 @@ export default function ChatScreen({ route, navigation }: any) {
       }
       await api(`/conversations/${conversationId}/read`, { method: "POST" });
     } catch {}
+  }
+
+  async function submitFeedback() {
+    if (!fbRating || fbSubmitting) return;
+    try {
+      setFbSubmitting(true);
+      await api(`/conversations/${conversationId}/feedback`, {
+        method: "POST",
+        body: { rating: fbRating, comment: fbComment.trim() || undefined },
+      });
+      setShowFeedback(false);
+      setFbComment("");
+      await load();
+    } catch (err: any) {
+      Alert.alert("Couldn't submit", err?.message || "Please try again.");
+    } finally {
+      setFbSubmitting(false);
+    }
   }
 
   useEffect(() => {
@@ -228,6 +283,16 @@ export default function ChatScreen({ route, navigation }: any) {
     if (editing) return saveEdit();
     const body = text.trim();
     if (!body || sending) return;
+    if (textWordLimit) {
+      const words = body.split(/\s+/).filter(Boolean).length;
+      if (words > textWordLimit) {
+        Alert.alert(
+          "Message too long",
+          `This package allows up to ${textWordLimit} words per text message. Yours has ${words}.`,
+        );
+        return;
+      }
+    }
     const replyId = replyTo?.id;
     setText("");
     setReplyTo(null);
@@ -341,7 +406,7 @@ export default function ChatScreen({ route, navigation }: any) {
       recTimer.current = setInterval(() => {
         recSecRef.current += 1;
         setRecSec(recSecRef.current);
-        if (recSecRef.current >= AUDIO_MAX_SEC) stopRecording(true);
+        if (recSecRef.current >= audioMaxSec) stopRecording(true);
       }, 1000);
     } catch {
       Alert.alert("Recording error", "Could not start recording.");
@@ -393,7 +458,7 @@ export default function ChatScreen({ route, navigation }: any) {
       }
       const res = await ImagePicker.launchCameraAsync({
         mediaTypes: ["videos"] as any,
-        videoMaxDuration: VIDEO_MAX_SEC,
+        videoMaxDuration: videoMaxSec,
         quality: 0.7,
       });
       if (res.canceled || !res.assets || !res.assets.length) return;
@@ -776,6 +841,13 @@ export default function ChatScreen({ route, navigation }: any) {
         </TouchableOpacity>
       </Modal>
 
+      {user?.role === "CLIENT" && allowance ? (
+        <View style={s.quotaBar}>
+          <Ionicons name="ticket-outline" size={14} color={colors.brand} />
+          <Text style={s.quotaText}>Remaining — {fmtAllowance(allowance)}</Text>
+        </View>
+      ) : null}
+
       {showBuy ? (
         <TouchableOpacity
           style={s.buyBar}
@@ -800,7 +872,7 @@ export default function ChatScreen({ route, navigation }: any) {
           <View style={s.recInfo}>
             <View style={s.recDot} />
             <Text style={s.recText}>
-              {"Recording  " + fmtDur(recSec) + " / " + fmtDur(AUDIO_MAX_SEC)}
+              {"Recording  " + fmtDur(recSec) + " / " + fmtDur(audioMaxSec)}
             </Text>
           </View>
           <TouchableOpacity
@@ -909,12 +981,65 @@ export default function ChatScreen({ route, navigation }: any) {
             )}
             {text.length > 0 ? (
               <Text style={s.counter}>
-                {text.length + "/" + TEXT_CHAR_LIMIT}
+                {textWordLimit
+                  ? text.trim().split(/\s+/).filter(Boolean).length +
+                    "/" +
+                    textWordLimit +
+                    " words"
+                  : text.length + "/" + TEXT_CHAR_LIMIT}
               </Text>
             ) : null}
           </View>
         </View>
       )}
+      {/* Book a Chat: consultation feedback (rating + comment) */}
+      <Modal
+        visible={showFeedback}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFeedback(false)}
+      >
+        <View style={s.fbBackdrop}>
+          <View style={s.fbCard}>
+            <Text style={s.fbTitle}>How was your consultation?</Text>
+            <Text style={s.fbSub}>
+              Your consultation is complete. Please rate your experience.
+            </Text>
+            <View style={s.fbStars}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <TouchableOpacity key={n} onPress={() => setFbRating(n)}>
+                  <Ionicons
+                    name={n <= fbRating ? "star" : "star-outline"}
+                    size={34}
+                    color={colors.brand}
+                    style={s.fbStar}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              value={fbComment}
+              onChangeText={setFbComment}
+              placeholder="Add a comment (optional)"
+              placeholderTextColor={colors.muted}
+              style={s.fbInput}
+              multiline
+            />
+            <TouchableOpacity
+              style={[s.fbBtn, !fbRating ? s.fbBtnDisabled : null]}
+              onPress={submitFeedback}
+              disabled={!fbRating || fbSubmitting}
+            >
+              <Text style={s.fbBtnText}>
+                {fbSubmitting ? "Submitting…" : "Submit feedback"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowFeedback(false)}>
+              <Text style={s.fbLater}>Maybe later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1113,6 +1238,56 @@ const s = StyleSheet.create({
   },
   replyBarName: { fontSize: 12, fontWeight: "700", color: colors.brand },
   replyBarText: { fontSize: 12, color: colors.muted },
+  quotaBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: colors.brandLight,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  quotaText: { color: colors.text, fontSize: 12, fontWeight: "600" },
+  fbBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  fbCard: { backgroundColor: colors.card, borderRadius: 16, padding: 20 },
+  fbTitle: { fontSize: 18, fontWeight: "700", color: colors.text },
+  fbSub: { fontSize: 13, color: colors.muted, marginTop: 4 },
+  fbStars: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginVertical: 16,
+  },
+  fbStar: { marginHorizontal: 4 },
+  fbInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 10,
+    minHeight: 60,
+    color: colors.text,
+    textAlignVertical: "top",
+  },
+  fbBtn: {
+    backgroundColor: colors.brand,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 14,
+  },
+  fbBtnDisabled: { opacity: 0.5 },
+  fbBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  fbLater: {
+    textAlign: "center",
+    color: colors.muted,
+    marginTop: 12,
+    fontSize: 13,
+  },
   buyBar: {
     flexDirection: "row",
     alignItems: "center",

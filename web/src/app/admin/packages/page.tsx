@@ -33,6 +33,8 @@ const EMPTY = {
   audioDuration: "",
   videoDuration: "",
   responseAllowance: "",
+  textWordLimit: "",
+  consultationMode: "CHAT",
 };
 
 // Convert blank string to null (=> unlimited), otherwise number.
@@ -99,6 +101,8 @@ export default function AdminPackages() {
       audioDuration: p.audioDuration ?? "",
       videoDuration: p.videoDuration ?? "",
       responseAllowance: p.responseAllowance ?? "",
+      textWordLimit: p.textWordLimit ?? "",
+      consultationMode: p.consultationMode ?? "CHAT",
     });
     setShow(true);
   }
@@ -132,6 +136,8 @@ export default function AdminPackages() {
       audioDuration: num(form.audioDuration),
       videoDuration: num(form.videoDuration),
       responseAllowance: num(form.responseAllowance),
+      textWordLimit: num(form.textWordLimit),
+      consultationMode: form.consultationMode,
     };
     try {
       if (editingId) {
@@ -218,6 +224,16 @@ export default function AdminPackages() {
               <option value="VIDEO">Video only</option>
               <option value="COMBINED">Combined (all channels)</option>
             </Select>
+            <Select
+              label="Consultation model"
+              value={form.consultationMode}
+              onChange={(e) =>
+                setForm({ ...form, consultationMode: e.target.value })
+              }
+            >
+              <option value="CHAT">Ongoing chat (back-and-forth)</option>
+              <option value="SINGLE">One-time submission (Book a Chat)</option>
+            </Select>
             <Input
               label="Price"
               type="number"
@@ -235,6 +251,11 @@ export default function AdminPackages() {
             {limitField(
               "textLimit",
               "Text messages",
+              !channelAllows(channel, "text"),
+            )}
+            {limitField(
+              "textWordLimit",
+              "Words per text msg",
               !channelAllows(channel, "text"),
             )}
             {limitField(

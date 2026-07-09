@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import {
   Badge,
@@ -183,7 +184,12 @@ export default function AdminClients() {
               <Card key={u.id}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium">{u.name}</p>
+                    <Link
+                      href={`/admin/clients/${u.id}`}
+                      className="font-medium text-brand hover:underline"
+                    >
+                      {u.name}
+                    </Link>
                     <p className="text-sm text-slate-500">{u.email}</p>
                   </div>
                   <div className="flex items-center gap-3">

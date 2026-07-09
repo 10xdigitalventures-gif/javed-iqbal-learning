@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { OrderStatus, SubscriptionStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityEventDto } from "./dto";
+import { parsePagination, Paginated } from "../common/list-query";
 
 // Central analytics + activity log. Every learning action funnels through
 // log(); the mobile app batches offline events and replays them via syncBatch()
@@ -136,5 +137,148 @@ export class ActivityService {
       readingProgress: progress,
       recentActivity: logs,
     };
+  }
+
+  // ---- Global audit log (admin) ----
+
+  // Build the Prisma where-clause shared by the list + CSV export so both stay
+  // in sync. Supports filtering by user, exact action, a free-text action
+  // search, and a created-at date range.
+  private auditWhere(opts: {
+    q?: string;
+    action?: string;
+    userId?: string;
+    from?: string;
+    to?: string;
+  }) {
+    const where: any = {};
+    if (opts.userId) where.userId = opts.userId;
+    if (opts.action) {
+      where.action = opts.action;
+    } else {
+      const term = (opts.q || "").trim();
+      if (term) where.action = { contains: term, mode: "insensitive" };
+    }
+    if (opts.from || opts.to) {
+      where.createdAt = {};
+      if (opts.from) where.createdAt.gte = new Date(opts.from);
+      if (opts.to) where.createdAt.lte = new Date(opts.to);
+    }
+    return where;
+  }
+
+  // Paginated, filterable global audit log for the admin audit screen. Each row
+  // includes the acting user (name/email/role) when known.
+  async listAll(opts: {
+    q?: string;
+    action?: string;
+    userId?: string;
+    from?: string;
+    to?: string;
+    page?: string | number;
+    pageSize?: string | number;
+  }): Promise<Paginated<any>> {
+    const where = this.auditWhere(opts);
+    const { page, pageSize, skip, take } = parsePagination(
+      opts.page,
+      opts.pageSize,
+    );
+    const [rows, total] = await Promise.all([
+      this.prisma.activityLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+        include: {
+          user: {
+            select: { id: true, name: true, email: true, role: true },
+          },
+        },
+      }),
+      this.prisma.activityLog.count({ where }),
+    ]);
+    return { rows, total, page, pageSize };
+  }
+
+  // Distinct action names currently in the log (for the filter dropdown).
+  async distinctActions(): Promise<string[]> {
+    const rows = await this.prisma.activityLog.findMany({
+      distinct: ["action"],
+      select: { action: true },
+      orderBy: { action: "asc" },
+      take: 300,
+    });
+    return rows.map((r) => r.action);
+  }
+
+  // CSV export of the (optionally filtered) global audit log.
+  async exportCsv(opts: {
+    q?: string;
+    action?: string;
+    userId?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  }): Promise<string> {
+    const where = this.auditWhere(opts);
+    const logs = await this.prisma.activityLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: Math.min(opts.limit ?? 20000, 20000),
+      include: {
+        user: { select: { name: true, email: true, role: true } },
+      },
+    });
+    const header = [
+      "createdAt",
+      "userName",
+      "userEmail",
+      "role",
+      "action",
+      "ip",
+      "meta",
+    ];
+    const escape = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const rows = logs.map((l) =>
+      [
+        l.createdAt.toISOString(),
+        l.user?.name ?? "",
+        l.user?.email ?? "",
+        l.user?.role ?? "",
+        l.action,
+        l.ip ?? "",
+        l.meta ?? "",
+      ]
+        .map(escape)
+        .join(","),
+    );
+    return [header.join(","), ...rows].join("\n");
+  }
+
+  // Paginated audit log for a single contact (used by the contact detail page).
+  async forUserPaged(
+    userId: string,
+    page?: string | number,
+    pageSize?: string | number,
+  ): Promise<Paginated<any>> {
+    const {
+      page: p,
+      pageSize: ps,
+      skip,
+      take,
+    } = parsePagination(page, pageSize);
+    const [rows, total] = await Promise.all([
+      this.prisma.activityLog.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      this.prisma.activityLog.count({ where: { userId } }),
+    ]);
+    return { rows, total, page: p, pageSize: ps };
   }
 }

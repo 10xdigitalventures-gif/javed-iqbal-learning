@@ -21,6 +21,7 @@ import {
   LogOut,
   MessageSquare,
   Package,
+  ScrollText,
   Settings,
   ShieldCheck,
   Trophy,
@@ -42,8 +43,16 @@ const nav = {
     { href: "/admin/bundles", label: "Bundles", icon: Package },
     { href: "/admin/courses", label: "Courses", icon: GraduationCap },
     { href: "/admin/reports", label: "Reports", icon: BarChart3 },
+    { href: "/admin/audit", label: "Audit log", icon: ScrollText },
     { href: "/admin/media", label: "Media Library", icon: Images },
+    { href: "/admin/support", label: "Support", icon: Headphones },
+    { href: "/admin/team", label: "Team & roles", icon: ShieldCheck },
+    { href: "/admin/inbox", label: "My alerts", icon: Bell },
     { href: "/admin/settings", label: "Settings", icon: Settings },
+  ],
+  SUPPORT: [
+    { href: "/admin/support", label: "Support", icon: Headphones },
+    { href: "/admin/inbox", label: "My alerts", icon: Bell },
   ],
   CONSULTANT: [
     { href: "/consultant", label: "Dashboard", icon: LayoutDashboard },
@@ -56,6 +65,7 @@ const nav = {
       icon: CalendarClock,
     },
     { href: "/consultant/communities", label: "Communities", icon: Users },
+    { href: "/consultant/support", label: "Support", icon: Headphones },
     { href: "/consultant/notifications", label: "Notifications", icon: Bell },
   ],
   CLIENT: [
@@ -73,6 +83,7 @@ const nav = {
     { href: "/client/meetings", label: "Meetings", icon: CalendarClock },
     { href: "/client/payments", label: "Payments", icon: CreditCard },
     { href: "/client/communities", label: "Communities", icon: Users },
+    { href: "/client/support", label: "Support", icon: Headphones },
     { href: "/client/notifications", label: "Notifications", icon: Bell },
   ],
 } satisfies Record<
@@ -85,19 +96,22 @@ export function Shell({
   role,
 }: {
   children: React.ReactNode;
-  role: Role;
+  role: Role | Role[];
 }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const allowed = Array.isArray(role) ? role : [role];
+  const allowedKey = allowed.join(",");
 
   useEffect(() => {
     if (loading) return;
     if (!user) router.replace("/login");
-    else if (user.role !== role) router.replace("/");
-  }, [loading, user, role, router]);
+    else if (!allowed.includes(user.role)) router.replace("/");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user, allowedKey, router]);
 
-  if (loading || !user || user.role !== role) return <Spinner />;
+  if (loading || !user || !allowed.includes(user.role)) return <Spinner />;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -109,7 +123,7 @@ export function Shell({
           <div>
             <p className="text-sm font-bold text-slate-950">Consult Hub</p>
             <p className="text-xs text-slate-500">
-              {role.toLowerCase()} portal
+              {user.role.toLowerCase()} portal
             </p>
           </div>
         </div>
@@ -117,7 +131,7 @@ export function Shell({
           className="flex-1 space-y-1 overflow-y-auto pb-16"
           aria-label="Main navigation"
         >
-          {nav[role].map((item) => {
+          {(nav[user.role] || []).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
             return (

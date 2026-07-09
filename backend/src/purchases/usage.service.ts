@@ -105,7 +105,25 @@ export class UsageService {
         remaining: unlimited ? null : remaining,
       };
     }
-    return result;
+
+    // Per-message caps + consultation mode come from the purchase that would
+    // actually be used for each channel (oldest active purchase with room).
+    const ordered = [...active].sort(
+      (a, b) => a.startedAt.getTime() - b.startedAt.getTime(),
+    );
+    const pick = (kind: "text" | "audio" | "video") =>
+      ordered.find((p) => this.hasRoom(p, kind)) || null;
+    const textP = pick("text");
+    const audioP = pick("audio");
+    const videoP = pick("video");
+    const anyP = textP || audioP || videoP || ordered[0] || null;
+    const limits = {
+      textWordLimit: textP?.textWordLimit ?? null,
+      audioSec: audioP?.audioDuration ?? null,
+      videoSec: videoP?.videoDuration ?? null,
+    };
+    const mode = anyP?.consultationMode ?? "CHAT";
+    return { ...result, limits, mode };
   }
 
   private limitFor(

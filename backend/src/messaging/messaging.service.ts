@@ -91,6 +91,17 @@ export class MessagingService {
         : user.role === Role.CLIENT
           ? { clientId: user.userId }
           : {};
+    // Messages the user can now see (their inbox is open) become "delivered".
+    if (user.role === Role.CLIENT || user.role === Role.CONSULTANT) {
+      await this.prisma.message.updateMany({
+        where: {
+          conversation: where,
+          senderId: { not: user.userId },
+          status: MessageStatus.SENT,
+        },
+        data: { status: MessageStatus.DELIVERED },
+      });
+    }
     const convos = await this.prisma.conversation.findMany({
       where,
       include: {
@@ -113,6 +124,7 @@ export class MessagingService {
       include: {
         client: { select: { id: true, name: true, avatarUrl: true } },
         consultant: { select: { id: true, name: true, avatarUrl: true } },
+        purchase: { select: { consultationMode: true } },
         messages: {
           orderBy: { createdAt: "asc" },
           include: MESSAGE_INCLUDE,
@@ -140,6 +152,7 @@ export class MessagingService {
 
     const kind = this.kindOf(dto.type);
     let purchaseId: string | null = null;
+    let clientPurchase: any = null;
 
     // Clients consume their package allowances. Consultant replies are governed
     // by responseAllowance but kept simple here (replies always allowed).
@@ -165,7 +178,21 @@ export class MessagingService {
           `${dto.type} message exceeds the ${durLimit}s limit for your package.`,
         );
       }
+      // Enforce the per-package word limit for text messages.
+      if (
+        dto.type === MessageType.TEXT &&
+        purchase.textWordLimit != null &&
+        dto.body
+      ) {
+        const words = dto.body.trim().split(/\s+/).filter(Boolean).length;
+        if (words > purchase.textWordLimit) {
+          throw new BadRequestException(
+            `Text message exceeds the ${purchase.textWordLimit}-word limit for your package.`,
+          );
+        }
+      }
       purchaseId = purchase.id;
+      clientPurchase = purchase;
     }
 
     if (dto.type === MessageType.TEXT && !dto.body?.trim()) {
@@ -216,9 +243,23 @@ export class MessagingService {
     });
 
     if (purchaseId) await this.usage.consume(purchaseId, kind);
+
+    // Advance the "Book a Chat" (SINGLE) consultation status workflow. Ongoing
+    // CHAT conversations keep their ACTIVE status untouched.
+    const convUpdate: any = { lastMessageAt: new Date() };
+    if (user.role === Role.CLIENT) {
+      if (purchaseId && !convo.purchaseId) convUpdate.purchaseId = purchaseId;
+      const mode =
+        clientPurchase?.consultationMode ??
+        (await this.modeForConversation(convo));
+      if (mode === "SINGLE") convUpdate.status = "MESSAGE_SUBMITTED";
+    } else if (user.role === Role.CONSULTANT) {
+      const mode = await this.modeForConversation(convo);
+      if (mode === "SINGLE") convUpdate.status = "RESPONSE_SENT";
+    }
     await this.prisma.conversation.update({
       where: { id: conversationId },
-      data: { lastMessageAt: new Date() },
+      data: convUpdate,
     });
 
     // Push the new message to both participants in real time (SSE) with a
@@ -257,6 +298,33 @@ export class MessagingService {
       where: { conversationId, senderId: { not: user.userId } },
       data: { status: MessageStatus.READ },
     });
+    // A consultant opening a submitted single-consultation moves it to review.
+    if (user.role === Role.CONSULTANT && convo.status === "MESSAGE_SUBMITTED") {
+      const mode = await this.modeForConversation(convo);
+      if (mode === "SINGLE") {
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { status: "UNDER_REVIEW" },
+        });
+      }
+    }
+    // A client reading the consultant's response auto-closes the single
+    // consultation; the client is then prompted for feedback in the app.
+    if (user.role === Role.CLIENT && convo.status === "RESPONSE_SENT") {
+      const mode = await this.modeForConversation(convo);
+      if (mode === "SINGLE") {
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { status: "CLOSED" },
+        });
+        for (const participantId of [convo.clientId, convo.consultantId]) {
+          this.realtime.emit(participantId, "conversation:status", {
+            conversationId,
+            status: "CLOSED",
+          });
+        }
+      }
+    }
     return { ok: true };
   }
 
@@ -409,6 +477,72 @@ export class MessagingService {
     if (message.senderId !== user.userId)
       throw new ForbiddenException("You can only modify your own messages");
     return { convo, message };
+  }
+
+  // Resolve the consultation mode (CHAT/SINGLE) for a conversation via its
+  // linked purchase. Unlinked conversations are treated as ongoing CHAT.
+  private async modeForConversation(convo: {
+    purchaseId: string | null;
+  }): Promise<string> {
+    if (!convo.purchaseId) return "CHAT";
+    const p = await this.prisma.purchase.findUnique({
+      where: { id: convo.purchaseId },
+      select: { consultationMode: true },
+    });
+    return p?.consultationMode ?? "CHAT";
+  }
+
+  // Close a consultation (consultant or admin participant). Marks it CLOSED and
+  // notifies both participants in real time.
+  async closeConsultation(user: AuthUser, conversationId: string) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!convo) throw new NotFoundException("Conversation not found");
+    assertParticipant(user, convo.clientId, convo.consultantId);
+    const updated = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { status: "CLOSED" },
+    });
+    for (const participantId of [convo.clientId, convo.consultantId]) {
+      this.realtime.emit(participantId, "conversation:status", {
+        conversationId,
+        status: "CLOSED",
+      });
+    }
+    return updated;
+  }
+
+  // Client feedback for a completed single consultation (rating 1-5 + comment).
+  // Submitting feedback also closes the consultation.
+  async submitFeedback(
+    user: AuthUser,
+    conversationId: string,
+    rating: number,
+    comment?: string,
+  ) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!convo) throw new NotFoundException("Conversation not found");
+    assertParticipant(user, convo.clientId, convo.consultantId);
+    if (user.userId !== convo.clientId)
+      throw new ForbiddenException("Only the client can leave feedback");
+    const clamped = Math.max(1, Math.min(5, Math.round(rating)));
+    const updated = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        feedbackRating: clamped,
+        feedbackComment: comment?.trim() || null,
+        feedbackAt: new Date(),
+        status: "CLOSED",
+      },
+    });
+    this.realtime.emit(convo.consultantId, "conversation:feedback", {
+      conversationId,
+      rating: clamped,
+    });
+    return updated;
   }
 
   private kindOf(type: MessageType): "text" | "audio" | "video" {

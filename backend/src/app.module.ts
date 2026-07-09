@@ -27,6 +27,7 @@ import { AiModule } from "./ai/ai.module";
 import { GamificationModule } from "./gamification/gamification.module";
 import { MailModule } from "./mail/mail.module";
 import { StorageModule } from "./storage/storage.module";
+import { SupportModule } from "./support/support.module";
 import { AppController } from "./app.controller";
 
 @Module({
@@ -61,6 +62,7 @@ import { AppController } from "./app.controller";
     SettingsModule,
     MediaModule,
     StorageModule,
+    SupportModule,
     AiModule,
     GamificationModule,
   ],

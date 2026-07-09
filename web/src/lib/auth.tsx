@@ -70,6 +70,7 @@ export function useAuth() {
 // Redirect helper for the post-login landing page based on role.
 export function homeForRole(role?: string) {
   if (role === "ADMIN") return "/admin";
+  if (role === "SUPPORT") return "/admin/support";
   if (role === "CONSULTANT") return "/consultant";
   return "/client";
 }

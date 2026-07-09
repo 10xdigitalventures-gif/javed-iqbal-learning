@@ -63,3 +63,13 @@ export class TypingDto {
   @IsBoolean()
   typing?: boolean;
 }
+
+export class SubmitFeedbackDto {
+  // Star rating 1-5 (clamped server-side).
+  @IsInt()
+  rating: number;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
+}

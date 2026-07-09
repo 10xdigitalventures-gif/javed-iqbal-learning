@@ -20,7 +20,8 @@ export class PurchasesService {
       include: { consultants: { select: { id: true } } },
     });
     if (!pkg) throw new NotFoundException("Package not found");
-    if (!pkg.isActive) throw new BadRequestException("This plan is no longer available");
+    if (!pkg.isActive)
+      throw new BadRequestException("This plan is no longer available");
 
     // Validate the plan is purchasable for the chosen consultant: a global plan
     // works with anyone, otherwise the consultant must be explicitly assigned.
@@ -54,6 +55,8 @@ export class PurchasesService {
         sessionDuration: pkg.sessionDuration,
         audioDuration: pkg.audioDuration,
         videoDuration: pkg.videoDuration,
+        textWordLimit: pkg.textWordLimit,
+        consultationMode: pkg.consultationMode,
         expiresAt,
       },
     });
@@ -88,7 +91,10 @@ export class PurchasesService {
   listForClient(clientId: string) {
     return this.prisma.purchase.findMany({
       where: { clientId },
-      include: { package: true, consultant: { select: { id: true, name: true } } },
+      include: {
+        package: true,
+        consultant: { select: { id: true, name: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -119,6 +125,35 @@ export class PurchasesService {
     });
     if (!p) throw new NotFoundException("Purchase not found");
     return p;
+  }
+
+  // Admin "Book a Chat" view: every one-time SINGLE consultation purchase with
+  // its client, package, payment status and linked conversation status.
+  listConsultations() {
+    return this.prisma.purchase.findMany({
+      where: { consultationMode: "SINGLE" },
+      include: {
+        package: { select: { name: true, consultationMode: true } },
+        client: { select: { id: true, name: true, email: true } },
+        consultant: { select: { id: true, name: true } },
+        payments: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: {
+            status: true,
+            invoiceNo: true,
+            amount: true,
+            currency: true,
+          },
+        },
+        conversations: {
+          orderBy: { lastMessageAt: "desc" },
+          take: 1,
+          select: { id: true, status: true, lastMessageAt: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
   }
 
   async cancel(id: string) {

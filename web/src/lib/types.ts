@@ -1,4 +1,4 @@
-export type Role = "ADMIN" | "CONSULTANT" | "CLIENT";
+export type Role = "ADMIN" | "SUPPORT" | "CONSULTANT" | "CLIENT";
 
 export type User = {
   id: string;
@@ -13,6 +13,7 @@ export type User = {
   isActive?: boolean;
   maxDevices?: number;
   tags?: string[];
+  scopes?: string[];
 };
 
 export type PackageChannel = "TEXT" | "AUDIO" | "VIDEO" | "COMBINED";
@@ -38,6 +39,8 @@ export type Package = {
   audioDuration: number | null;
   videoDuration: number | null;
   responseAllowance: number | null;
+  textWordLimit: number | null;
+  consultationMode: "CHAT" | "SINGLE";
   billingDays: number | null;
 };
 

@@ -190,6 +190,22 @@ export default function ProfileScreen() {
         ) : null}
       </View>
 
+      <TouchableOpacity
+        style={s.supportCard}
+        onPress={() => nav.navigate("Support", {})}
+      >
+        <View style={s.supportIcon}>
+          <Ionicons name="chatbubbles" size={20} color={colors.brand} />
+        </View>
+        <View style={s.flex1}>
+          <Text style={s.supportTitle}>Support chat</Text>
+          <Text style={s.supportSub}>
+            Open a ticket for any issue — technical, billing, books or courses
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+      </TouchableOpacity>
+
       <Text style={s.section}>Account</Text>
       <View style={s.card}>
         {accountRows.map((r, i) => (
@@ -300,6 +316,32 @@ const s = StyleSheet.create({
   subInfo: { flex: 1, marginLeft: 12 },
   subTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   subSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  supportCard: {
+    backgroundColor: colors.brandLight,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.brand,
+    padding: 16,
+    marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  supportIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.card,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  supportTitle: { fontSize: 15, fontWeight: "800", color: colors.text },
+  supportSub: {
+    fontSize: 12,
+    color: colors.muted,
+    marginTop: 2,
+    lineHeight: 16,
+  },
   section: {
     fontSize: 13,
     fontWeight: "700",

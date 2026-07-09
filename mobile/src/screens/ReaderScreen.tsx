@@ -24,6 +24,7 @@ import {
 } from "../secure";
 import { trackEvent } from "../activity";
 import { useContentProtection } from "../protect";
+import { useUrduFont } from "../urduFont";
 
 type Chapter = {
   id: string;
@@ -132,6 +133,7 @@ export default function ReaderScreen() {
   const [showChapters, setShowChapters] = useState(false);
   const [lang, setLang] = useState<"en" | "ur">("en");
   const [hasUrdu, setHasUrdu] = useState(false);
+  const urduFont = useUrduFont();
   const [locked, setLocked] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState("");
@@ -609,9 +611,12 @@ export default function ReaderScreen() {
                   s.paragraph,
                   {
                     fontSize,
-                    lineHeight: Math.round(fontSize * lineMult),
+                    lineHeight: Math.round(
+                      fontSize * lineMult * (lang === "ur" ? 1.7 : 1),
+                    ),
                     color: th.text,
-                    fontFamily: serif ? "serif" : undefined,
+                    fontFamily:
+                      lang === "ur" ? urduFont : serif ? "serif" : undefined,
                     textAlign: lang === "ur" ? "right" : "left",
                     writingDirection: lang === "ur" ? "rtl" : "ltr",
                   },

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { PaymentStatus, Role } from "@prisma/client";
+import { HardCopyOrderStatus, PaymentStatus, Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
 import { PurchasesService } from "../purchases/purchases.service";
@@ -61,6 +61,7 @@ export class PaymentsService {
         order: {
           include: { book: true, bundle: true, plan: true, course: true },
         },
+        hardCopy: { include: { book: true } },
       },
     });
     if (!payment) throw new NotFoundException("Payment not found");
@@ -80,6 +81,8 @@ export class PaymentsService {
         payment.order?.plan?.name ||
         payment.order?.course?.title ||
         payment.purchase?.package?.name ||
+        payment.hardCopy?.book?.title ||
+        (payment.hardCopyOrderId ? "Hard copy order" : "") ||
         "Consultation",
       customerEmail: payment.user.email,
       customerName: payment.user.name,
@@ -109,6 +112,14 @@ export class PaymentsService {
     // Digital-product orders (books, bundles, subscriptions) grant access here.
     if (payment.orderId) {
       await this.orders.fulfill(payment.orderId);
+    }
+    // Physical-book orders: mark the hard copy order as paid/processing so the
+    // fulfilment team can ship it. Idempotent.
+    if (payment.hardCopyOrderId) {
+      await this.prisma.hardCopyOrder.update({
+        where: { id: payment.hardCopyOrderId },
+        data: { status: HardCopyOrderStatus.PROCESSING },
+      });
     }
     await this.notifications.create(payment.userId, {
       type: "PAYMENT_CONFIRMED",

@@ -104,7 +104,7 @@ function productName(o: Order) {
 
 export default function AdminPayments() {
   const [tab, setTab] = useState<
-    "orders" | "transactions" | "bank" | "hardcopy"
+    "orders" | "transactions" | "bank" | "hardcopy" | "consultations"
   >("orders");
 
   return (
@@ -136,6 +136,12 @@ export default function AdminPayments() {
         >
           Hard Copy
         </button>
+        <button
+          className={tabCls(tab === "consultations")}
+          onClick={() => setTab("consultations")}
+        >
+          Book a Chat
+        </button>
       </div>
 
       {tab === "orders" ? (
@@ -144,8 +150,10 @@ export default function AdminPayments() {
         <TransactionsTab />
       ) : tab === "bank" ? (
         <BankTransfersTab />
-      ) : (
+      ) : tab === "hardcopy" ? (
         <HardCopyTab />
+      ) : (
+        <ConsultationsTab />
       )}
     </div>
   );
@@ -891,15 +899,28 @@ type HardCopyOrder = {
   id: string;
   name: string;
   phone: string;
+  email?: string;
   address: string;
+  addressLine2?: string;
   city: string;
+  state?: string;
+  country?: string;
   quantity: number;
   status: string;
   paymentMethod?: string;
+  amount?: number;
+  currency?: string;
   createdAt: string;
   user?: { name: string; email: string };
   book?: { title: string };
 };
+
+// Join the delivery address parts that are present into one readable line.
+function hcAddress(o: HardCopyOrder) {
+  return [o.address, o.addressLine2, o.city, o.state, o.country]
+    .filter(Boolean)
+    .join(", ");
+}
 
 function HardCopyTab() {
   const [rows, setRows] = useState<HardCopyOrder[] | null>(null);
@@ -917,6 +938,8 @@ function HardCopyTab() {
           "Qty",
           "Address",
           "City",
+          "State",
+          "Country",
           "Payment",
           "Status",
           "Date",
@@ -924,11 +947,13 @@ function HardCopyTab() {
         (rows || []).map((o) => [
           o.name,
           o.phone,
-          o.user?.email || "",
+          o.email || o.user?.email || "",
           o.book?.title || "",
           o.quantity,
-          o.address,
+          [o.address, o.addressLine2].filter(Boolean).join(" "),
           o.city,
+          o.state || "",
+          o.country || "",
           hcPayLabel[o.paymentMethod || "cod"] ||
             o.paymentMethod ||
             "Cash on Delivery",
@@ -1008,16 +1033,16 @@ function HardCopyTab() {
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-800">{o.name}</div>
                     <div className="text-xs text-slate-400">{o.phone}</div>
-                    {o.user?.email ? (
+                    {o.email || o.user?.email ? (
                       <div className="text-xs text-slate-400">
-                        {o.user.email}
+                        {o.email || o.user?.email}
                       </div>
                     ) : null}
                   </td>
                   <td className="px-4 py-3">{o.book?.title || "\u2014"}</td>
                   <td className="px-4 py-3">{o.quantity}</td>
                   <td className="max-w-[220px] px-4 py-3 text-xs text-slate-500">
-                    {o.address}, {o.city}
+                    {hcAddress(o)}
                   </td>
                   <td className="px-4 py-3">
                     <Badge color="slate">
@@ -1060,6 +1085,159 @@ function HardCopyTab() {
                   </td>
                 </tr>
               ) : null}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ---- Book a Chat (one-time consultation) orders ----
+const consultStatusColor: Record<string, any> = {
+  ACTIVE: "blue",
+  WAITING_SUBMISSION: "amber",
+  MESSAGE_SUBMITTED: "amber",
+  UNDER_REVIEW: "blue",
+  RESPONSE_SENT: "green",
+  CLOSED: "slate",
+};
+
+const consultStatusLabel: Record<string, string> = {
+  ACTIVE: "Active",
+  WAITING_SUBMISSION: "Awaiting submission",
+  MESSAGE_SUBMITTED: "Submitted",
+  UNDER_REVIEW: "Under review",
+  RESPONSE_SENT: "Response sent",
+  CLOSED: "Closed",
+};
+
+type Consultation = {
+  id: string;
+  invoiceNo?: string;
+  amount: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+  package?: { name: string; consultationMode: string };
+  client?: { name: string; email: string };
+  consultant?: { name: string } | null;
+  payments?: { status: string }[];
+  conversations?: { id: string; status: string; lastMessageAt: string }[];
+};
+
+function ConsultationsTab() {
+  const [rows, setRows] = useState<Consultation[] | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    api<Consultation[]>("/purchases/consultations")
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, []);
+
+  function exportCsv() {
+    setExporting(true);
+    try {
+      downloadCsv(
+        "book-a-chat.csv",
+        [
+          "Client",
+          "Email",
+          "Package",
+          "Consultant",
+          "Amount",
+          "Payment",
+          "Status",
+          "Date",
+        ],
+        (rows || []).map((r) => [
+          r.client?.name || "",
+          r.client?.email || "",
+          r.package?.name || "",
+          r.consultant?.name || "",
+          r.amount + " " + r.currency,
+          r.payments?.[0]?.status || "",
+          consultStatusLabel[r.conversations?.[0]?.status || ""] ||
+            "Not started",
+          new Date(r.createdAt).toLocaleString(),
+        ]),
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const list = rows ?? [];
+
+  return (
+    <div>
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="outline"
+          onClick={exportCsv}
+          disabled={exporting || !rows}
+        >
+          {exporting ? "Exporting…" : "Export CSV"}
+        </Button>
+      </div>
+      {!rows ? (
+        <Spinner />
+      ) : list.length === 0 ? (
+        <Card className="p-6 text-sm text-slate-500">
+          No Book a Chat consultations yet.
+        </Card>
+      ) : (
+        <Card className="overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Client</th>
+                <th className="px-4 py-3">Package</th>
+                <th className="px-4 py-3">Consultant</th>
+                <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Payment</th>
+                <th className="px-4 py-3">Consultation</th>
+                <th className="px-4 py-3">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((r) => {
+                const cStatus = r.conversations?.[0]?.status || "";
+                return (
+                  <tr
+                    key={r.id}
+                    className="border-b border-slate-100 align-top"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-800">
+                        {r.client?.name || "—"}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {r.client?.email || ""}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">{r.package?.name || "—"}</td>
+                    <td className="px-4 py-3">{r.consultant?.name || "—"}</td>
+                    <td className="px-4 py-3">
+                      {r.amount} {r.currency}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge color="slate">
+                        {r.payments?.[0]?.status || "—"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge color={consultStatusColor[cStatus] || "slate"}>
+                        {consultStatusLabel[cStatus] || "Not started"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {new Date(r.createdAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </Card>

@@ -29,7 +29,10 @@ export class PackagesService {
     return this.prisma.package.findMany({
       where: {
         isActive: true,
-        OR: [{ isGlobal: true }, { consultants: { some: { id: consultantId } } }],
+        OR: [
+          { isGlobal: true },
+          { consultants: { some: { id: consultantId } } },
+        ],
       },
       orderBy: { price: "asc" },
       include: INCLUDE_CONSULTANTS,
@@ -70,6 +73,8 @@ export class PackagesService {
         sessionLimit: dto.sessionLimit ?? null,
         sessionDuration: dto.sessionDuration ?? null,
         responseAllowance: dto.responseAllowance ?? null,
+        textWordLimit: dto.textWordLimit ?? null,
+        consultationMode: dto.consultationMode ?? "CHAT",
         billingDays: dto.billingDays ?? this.defaultBillingDays(dto.type),
         consultants: this.consultantConnect(dto),
       },
@@ -96,9 +101,13 @@ export class PackagesService {
         sessionLimit: dto.sessionLimit ?? null,
         sessionDuration: dto.sessionDuration ?? null,
         responseAllowance: dto.responseAllowance ?? null,
+        textWordLimit: dto.textWordLimit ?? null,
+        consultationMode: dto.consultationMode ?? "CHAT",
         billingDays: dto.billingDays ?? this.defaultBillingDays(dto.type),
         // `set` replaces the whole assignment list on every edit.
-        consultants: { set: (dto.consultantIds ?? []).map((cid) => ({ id: cid })) },
+        consultants: {
+          set: (dto.consultantIds ?? []).map((cid) => ({ id: cid })),
+        },
       },
       include: INCLUDE_CONSULTANTS,
     });

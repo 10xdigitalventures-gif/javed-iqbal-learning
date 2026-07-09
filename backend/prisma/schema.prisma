@@ -12,6 +12,9 @@ datasource db {
 
 enum Role {
   ADMIN
+  // Admin-portal staff (support agents). Same portal as ADMIN but limited by
+  // the per-user `scopes` list (e.g. may not delete).
+  SUPPORT
   CONSULTANT
   CLIENT
 }
@@ -50,6 +53,24 @@ enum MessageStatus {
   SENT
   DELIVERED
   READ
+}
+
+// Consultation delivery model for a package/purchase.
+//   CHAT   = ongoing back-and-forth (limited only by credits)
+//   SINGLE = one-time "Book a Chat" submission + consultant response
+enum ConsultationMode {
+  CHAT
+  SINGLE
+}
+
+// Lifecycle status for a single-submission consultation conversation.
+enum ConsultationStatus {
+  ACTIVE
+  WAITING_SUBMISSION
+  MESSAGE_SUBMITTED
+  UNDER_REVIEW
+  RESPONSE_SENT
+  CLOSED
 }
 
 enum MeetingStatus {
@@ -106,6 +127,10 @@ model User {
 
   // Admin-assigned segmentation tags (used to target push notifications)
   tags       String[] @default([])
+
+  // Fine-grained permission scopes for admin-portal staff (SUPPORT role).
+  // ADMIN implicitly has every scope; SUPPORT is limited to what is listed.
+  scopes     String[] @default([])
 
   // Concurrent device limit: how many devices may stay logged in at once.
   // When a new device logs in beyond this limit, the oldest device is signed
@@ -168,6 +193,11 @@ model User {
   // (Package.isGlobal = true) are available to every consultant and are not
   // listed here.
   packages                Package[]      @relation("PackageConsultants")
+
+  // Support tickets (in-app help chat)
+  supportTickets          SupportTicket[]
+  supportMessages         SupportMessage[] @relation("SupportMessageSender")
+  assignedSupportTickets  SupportTicket[]  @relation("AssignedSupportTickets")
 }
 
 model Package {
@@ -193,6 +223,8 @@ model Package {
   audioDuration     Int? // max seconds per audio message
   videoDuration     Int? // max seconds per video message
   responseAllowance Int? // consultant responses included
+  textWordLimit     Int? // max words per text message (null = unlimited)
+  consultationMode  ConsultationMode @default(CHAT)
 
   // billing period in days for recurring packages (e.g. 30, 365). null for one-time
   billingDays Int?
@@ -221,6 +253,8 @@ model Purchase {
   sessionDuration Int?
   audioDuration   Int?
   videoDuration   Int?
+  textWordLimit    Int?
+  consultationMode ConsultationMode @default(CHAT)
 
   // usage counters
   textUsed     Int @default(0)
@@ -237,6 +271,7 @@ model Purchase {
   messages   Message[]
   meetings   Meeting[]
   payments   Payment[]
+  conversations Conversation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -246,11 +281,17 @@ model Conversation {
   id           String   @id @default(cuid())
   clientId     String
   consultantId String
+  purchaseId   String?
+  status       ConsultationStatus @default(ACTIVE)
+  feedbackRating  Int?
+  feedbackComment String?
+  feedbackAt      DateTime?
   lastMessageAt DateTime @default(now())
   createdAt    DateTime @default(now())
 
   client     User      @relation("ClientConversations", fields: [clientId], references: [id])
   consultant User      @relation("ConsultantConversations", fields: [consultantId], references: [id])
+  purchase   Purchase? @relation(fields: [purchaseId], references: [id])
   messages   Message[]
 
   @@unique([clientId, consultantId])
@@ -341,6 +382,9 @@ model Payment {
   // legacy consultation flow uses `purchaseId` instead; exactly one is set.
   orderId    String?
 
+  // Physical-book (hard copy) order this payment settles, when set.
+  hardCopyOrderId String?
+
   // Manual bank-transfer fields (gateway = "bank_transfer"). Set when a buyer
   // submits proof of an offline transfer; an admin verifies to mark it paid.
   proofKey   String?
@@ -351,6 +395,7 @@ model Payment {
   user     User      @relation(fields: [userId], references: [id])
   purchase Purchase? @relation(fields: [purchaseId], references: [id])
   order    Order?    @relation(fields: [orderId], references: [id])
+  hardCopy HardCopyOrder? @relation(fields: [hardCopyOrderId], references: [id])
 }
 
 model Notification {
@@ -860,21 +905,29 @@ model Subscription {
 }
 
 model HardCopyOrder {
-  id        String              @id @default(cuid())
-  userId    String
-  bookId    String?
-  name      String
-  phone     String
-  address   String
-  city      String
-  quantity  Int                 @default(1)
-  status    HardCopyOrderStatus @default(PENDING)
-  notes     String?
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  id           String              @id @default(cuid())
+  userId       String
+  bookId       String?
+  name         String
+  phone        String
+  email        String?
+  address      String
+  addressLine2 String?
+  city         String
+  state        String?
+  country      String?
+  quantity     Int                 @default(1)
+  status       HardCopyOrderStatus @default(PENDING)
+  paymentMethod String?
+  amount        Float?
+  currency      String              @default("PKR")
+  notes        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
 
-  user User  @relation(fields: [userId], references: [id])
-  book Book? @relation(fields: [bookId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  book     Book?     @relation(fields: [bookId], references: [id])
+  payments Payment[]
 }
 
 model CommunityPostLike {
@@ -1462,4 +1515,58 @@ model BundleOffer {
   bundle Bundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
 
   @@index([bundleId])
+}
+
+
+enum SupportCategory {
+  TECHNICAL
+  BILLING
+  BOOKS
+  COURSES
+  OTHER
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+// In-app support/help chat. A client or consultant opens a ticket with a
+// subject + category + first message; admin (support team) replies in a
+// threaded conversation and can move the ticket through its lifecycle.
+model SupportTicket {
+  id          String              @id @default(cuid())
+  userId      String
+  subject     String
+  category    SupportCategory     @default(OTHER)
+  status      SupportTicketStatus @default(OPEN)
+  lastReplyAt  DateTime            @default(now())
+  assignedToId String?
+  assignedAt   DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo User?            @relation("AssignedSupportTickets", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model SupportMessage {
+  id        String   @id @default(cuid())
+  ticketId  String
+  senderId  String
+  body      String
+  isStaff   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation("SupportMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
 }

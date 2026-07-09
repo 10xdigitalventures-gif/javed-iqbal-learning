@@ -7,7 +7,7 @@ import {
   IsString,
   Min,
 } from "class-validator";
-import { PackageChannel, PackageType } from "@prisma/client";
+import { ConsultationMode, PackageChannel, PackageType } from "@prisma/client";
 
 export class CreatePackageDto {
   @IsString()
@@ -75,6 +75,16 @@ export class CreatePackageDto {
   @IsOptional()
   @IsNumber()
   responseAllowance?: number;
+
+  // Max words per text message (null/omitted = unlimited).
+  @IsOptional()
+  @IsNumber()
+  textWordLimit?: number;
+
+  // Ongoing chat vs one-time "Book a Chat" submission.
+  @IsOptional()
+  @IsEnum(ConsultationMode)
+  consultationMode?: ConsultationMode;
 
   @IsOptional()
   @IsNumber()

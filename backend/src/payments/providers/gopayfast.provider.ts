@@ -28,17 +28,41 @@ export class GoPayFastProvider implements PaymentProvider {
   private readonly logger = new Logger("GoPayFastProvider");
 
   isEnabled() {
-    return Boolean(
-      process.env.GOPAYFAST_MERCHANT_ID && process.env.GOPAYFAST_SECURED_KEY,
-    );
+    const { merchantId, securedKey } = this.creds();
+    return Boolean(merchantId && securedKey);
+  }
+
+  // Whether we are pointed at the live IPG (vs the sandbox / UAT one).
+  private isLive() {
+    return String(process.env.GOPAYFAST_MODE).toLowerCase() === "live";
+  }
+
+  // Merchant credentials for the active mode. Sandbox and live keys can both be
+  // configured at once (GOPAYFAST_SANDBOX_* / GOPAYFAST_LIVE_*) and switched
+  // with GOPAYFAST_MODE; each falls back to the generic GOPAYFAST_* keys so a
+  // single-environment setup keeps working unchanged.
+  private creds() {
+    const live = this.isLive();
+    const merchantId =
+      (live
+        ? process.env.GOPAYFAST_LIVE_MERCHANT_ID
+        : process.env.GOPAYFAST_SANDBOX_MERCHANT_ID) ||
+      process.env.GOPAYFAST_MERCHANT_ID ||
+      "";
+    const securedKey =
+      (live
+        ? process.env.GOPAYFAST_LIVE_SECURED_KEY
+        : process.env.GOPAYFAST_SANDBOX_SECURED_KEY) ||
+      process.env.GOPAYFAST_SECURED_KEY ||
+      "";
+    return { merchantId, securedKey };
   }
 
   // Base URL for the APPS IPG. Sandbox (UAT) vs live is controlled by
   // GOPAYFAST_MODE, and can be fully overridden with GOPAYFAST_API_BASE.
   private apiBase() {
     if (process.env.GOPAYFAST_API_BASE) return process.env.GOPAYFAST_API_BASE;
-    const live = String(process.env.GOPAYFAST_MODE).toLowerCase() === "live";
-    return live
+    return this.isLive()
       ? "https://ipg1.apps.net.pk/Ecommerce/api/Transaction"
       : "https://ipguat.apps.net.pk/Ecommerce/api/Transaction";
   }
@@ -49,19 +73,14 @@ export class GoPayFastProvider implements PaymentProvider {
 
   // Hosted-checkout signature, exactly as the WooCommerce plugin builds it:
   // md5(MERCHANT_ID:MERCHANT_NAME:TXNAMT:BASKET_ID).
-  private buildSignature(
-    merchantId: string,
-    amount: string,
-    basketId: string,
-  ) {
+  private buildSignature(merchantId: string, amount: string, basketId: string) {
     return createHash("md5")
       .update(`${merchantId}:${this.merchantName()}:${amount}:${basketId}`)
       .digest("hex");
   }
 
   async createCheckout(ctx: CheckoutContext): Promise<CheckoutResult> {
-    const merchantId = process.env.GOPAYFAST_MERCHANT_ID as string;
-    const securedKey = process.env.GOPAYFAST_SECURED_KEY as string;
+    const { merchantId, securedKey } = this.creds();
     const amount = ctx.amount.toFixed(2);
     const currency = ctx.currency || "PKR";
 
@@ -124,9 +143,7 @@ export class GoPayFastProvider implements PaymentProvider {
     };
   }
 
-  async handleWebhook(
-    payload: Record<string, any>,
-  ): Promise<WebhookResult> {
+  async handleWebhook(payload: Record<string, any>): Promise<WebhookResult> {
     // GoPayFast posts back form-encoded fields; err_code "000"/"00"/"0" == success.
     const paymentId = payload.basket_id || payload.BASKET_ID;
     const code = String(
@@ -140,8 +157,9 @@ export class GoPayFastProvider implements PaymentProvider {
     // mismatch. err_code stays the source of truth because IPN field names vary
     // between gateway versions.
     const sentSignature = payload.signature || payload.SIGNATURE;
-    const merchantId = process.env.GOPAYFAST_MERCHANT_ID as string;
-    const amount = payload.TXNAMT ?? payload.transaction_amount ?? payload.amount;
+    const merchantId = this.creds().merchantId;
+    const amount =
+      payload.TXNAMT ?? payload.transaction_amount ?? payload.amount;
     if (sentSignature && merchantId && amount != null && paymentId) {
       const expected = this.buildSignature(
         merchantId,

@@ -14,6 +14,7 @@ import {
   ReactDto,
   SendMessageDto,
   StartConversationDto,
+  SubmitFeedbackDto,
   TypingDto,
 } from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -51,6 +52,22 @@ export class MessagingController {
   @Post(":id/read")
   read(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.markRead(user, id);
+  }
+
+  // Close a "Book a Chat" consultation (consultant/admin participant).
+  @Post(":id/close")
+  close(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.closeConsultation(user, id);
+  }
+
+  // Client leaves feedback for a completed single consultation.
+  @Post(":id/feedback")
+  feedback(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: SubmitFeedbackDto,
+  ) {
+    return this.service.submitFeedback(user, id, dto.rating, dto.comment);
   }
 
   @Patch(":id/messages/:messageId")

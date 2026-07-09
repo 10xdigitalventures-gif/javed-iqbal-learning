@@ -60,6 +60,13 @@ export class PurchasesController {
     return this.service.listAll();
   }
 
+  // Admin "Book a Chat" tab: one-time consultation purchases with status.
+  @Get("consultations")
+  @Roles(Role.ADMIN)
+  consultations() {
+    return this.service.listConsultations();
+  }
+
   @Get(":id")
   get(@Param("id") id: string) {
     return this.service.get(id);

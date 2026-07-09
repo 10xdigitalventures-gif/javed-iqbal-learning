@@ -48,6 +48,8 @@ import CertificatesScreen from "./src/screens/CertificatesScreen";
 import CourseDetailScreen from "./src/screens/CourseDetailScreen";
 import LessonDetailScreen from "./src/screens/LessonDetailScreen";
 import QuizDetailScreen from "./src/screens/QuizDetailScreen";
+import SupportScreen from "./src/screens/SupportScreen";
+import SupportTicketScreen from "./src/screens/SupportTicketScreen";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -373,6 +375,16 @@ function Root() {
             name="Consultants"
             component={ConsultantsScreen as any}
             options={consultantsOpts}
+          />
+          <Stack.Screen
+            name="Support"
+            component={SupportScreen as any}
+            options={{ title: "Support" } as any}
+          />
+          <Stack.Screen
+            name="SupportTicket"
+            component={SupportTicketScreen as any}
+            options={{ title: "Support ticket" } as any}
           />
         </>
       ) : (

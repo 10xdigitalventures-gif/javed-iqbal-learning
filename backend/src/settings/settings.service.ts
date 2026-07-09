@@ -70,6 +70,24 @@ const ENV_GROUPS: EnvGroup[] = [
         label: "PayFast \u2013 Secured key",
         secret: true,
       },
+      {
+        key: "GOPAYFAST_SANDBOX_MERCHANT_ID",
+        label: "PayFast \u2013 Sandbox Merchant ID",
+      },
+      {
+        key: "GOPAYFAST_SANDBOX_SECURED_KEY",
+        label: "PayFast \u2013 Sandbox Secured key",
+        secret: true,
+      },
+      {
+        key: "GOPAYFAST_LIVE_MERCHANT_ID",
+        label: "PayFast \u2013 Live Merchant ID",
+      },
+      {
+        key: "GOPAYFAST_LIVE_SECURED_KEY",
+        label: "PayFast \u2013 Live Secured key",
+        secret: true,
+      },
       { key: "GOPAYFAST_MERCHANT_NAME", label: "PayFast \u2013 Merchant name" },
       { key: "GOPAYFAST_MODE", label: "PayFast \u2013 Mode (sandbox / live)" },
       {
