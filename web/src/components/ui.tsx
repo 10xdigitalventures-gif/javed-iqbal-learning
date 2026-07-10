@@ -6,10 +6,15 @@ import clsx from "clsx";
 export function Button({
   children,
   variant = "primary",
+  size = "md",
+  loading = false,
   className,
+  disabled,
   ...props
 }: {
   variant?: "primary" | "outline" | "ghost" | "danger";
+  size?: "sm" | "md" | "lg";
+  loading?: boolean;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const styles = {
     primary: "bg-brand text-white hover:bg-brand-dark",
@@ -17,15 +22,25 @@ export function Button({
     ghost: "hover:bg-slate-100",
     danger: "bg-red-600 text-white hover:bg-red-700",
   };
+  const sizes = {
+    sm: "px-3 py-1.5 text-xs",
+    md: "px-4 py-2 text-sm",
+    lg: "px-6 py-3 text-base",
+  };
   return (
     <button
       className={clsx(
-        "inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg font-medium outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
         styles[variant],
+        sizes[size],
         className,
       )}
+      disabled={disabled || loading}
       {...props}
     >
+      {loading && (
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      )}
       {children}
     </button>
   );
@@ -122,14 +137,18 @@ export function Card({
   );
 }
 
+export type BadgeColor = "slate" | "green" | "red" | "blue" | "amber";
+
 export function Badge({
   children,
   color = "slate",
 }: {
   children: React.ReactNode;
-  color?: "slate" | "green" | "red" | "blue" | "amber";
+  // Accept the known BadgeColor literals for autocomplete, but also tolerate a
+  // plain string coming from status->color maps (falls back to "slate").
+  color?: BadgeColor | (string & {});
 }) {
-  const colors = {
+  const colors: Record<string, string> = {
     slate: "bg-slate-100 text-slate-700",
     green: "bg-green-100 text-green-700",
     red: "bg-red-100 text-red-700",
@@ -140,7 +159,7 @@ export function Badge({
     <span
       className={clsx(
         "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
-        colors[color],
+        colors[color] || colors.slate,
       )}
     >
       {children}

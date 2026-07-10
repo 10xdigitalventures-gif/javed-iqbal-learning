@@ -113,7 +113,7 @@ export class SupportService {
     return this.get(user, id);
   }
 
-  async setStatus(id: string, dto: UpdateTicketStatusDto) {
+  async setStatus(user: AuthUser, id: string, dto: UpdateTicketStatusDto) {
     const ticket = await this.prisma.supportTicket.findUnique({
       where: { id },
     });
@@ -122,5 +122,51 @@ export class SupportService {
       where: { id },
       data: { status: dto.status },
     });
+  }
+
+  // Staff (ADMIN + SUPPORT) who can be assigned tickets.
+  listStaff() {
+    return this.prisma.user.findMany({
+      where: { role: { in: [Role.ADMIN, Role.SUPPORT] } },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
+  // Assign (or unassign) a ticket to a staff user. Pass an empty assigneeId to
+  // clear the assignment.
+  async assign(user: AuthUser, id: string, assigneeId: string) {
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+    });
+    if (!ticket) throw new NotFoundException("Ticket not found");
+    const clear = !assigneeId || !assigneeId.trim();
+    return this.prisma.supportTicket.update({
+      where: { id },
+      data: {
+        assignedToId: clear ? null : assigneeId,
+        assignedAt: clear ? null : new Date(),
+      },
+    });
+  }
+
+  // Delete a ticket. ADMIN always may; SUPPORT staff need an explicit
+  // "tickets.delete" scope on their user record.
+  async remove(user: AuthUser, id: string) {
+    if (user.role !== Role.ADMIN) {
+      const staff = await this.prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { scopes: true },
+      });
+      if (!staff?.scopes?.includes("tickets.delete")) {
+        throw new ForbiddenException("You cannot delete tickets");
+      }
+    }
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+    });
+    if (!ticket) throw new NotFoundException("Ticket not found");
+    await this.prisma.supportTicket.delete({ where: { id } });
+    return { ok: true };
   }
 }

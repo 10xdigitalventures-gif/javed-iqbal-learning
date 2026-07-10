@@ -1,55 +1,31 @@
-# ============================================================
-# Prof. Dr. Javed Iqbal Learning App — root .gitignore
-# ============================================================
-
-# Dependencies
+# dependencies
 node_modules/
+**/node_modules/
 
-# Environment variables — NEVER commit secrets
-.env
-.env.local
-.env.production
-.env*.local
-
-# Build outputs
-dist/
-build/
+# builds
 .next/
-out/
+**/.next/
+dist/
+**/dist/
 
-# Expo / React Native
-.expo/
-web-build/
-mobile/android/
-mobile/ios/
-
-# Logs
+# logs
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
 
-# Uploads (user-uploaded files, store in S3/cloud in production)
-uploads/
+# env / secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
 
-# OS
+# automation state
+logs/.deploy-state.json
+
+# expo / mobile
+.expo/
+**/.expo/
+
+# os
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# TypeScript
-*.tsbuildinfo
-
-# Prisma — keep schema & migrations, ignore generated client binary
-backend/node_modules/
-
-# Jest / test coverage
-coverage/
-
-# EAS Build
-.easignore

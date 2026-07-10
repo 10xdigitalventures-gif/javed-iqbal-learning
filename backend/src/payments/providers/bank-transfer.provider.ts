@@ -15,9 +15,12 @@ import {
 export class BankTransferProvider implements PaymentProvider {
   readonly name = "bank_transfer";
 
-  // Enabled by default; set BANK_TRANSFER_ENABLED=false to hide the option.
+  // OFF by default (10X app direction: app pays via card/PayFast only,
+  // instant access). The provider stays in code and is not removed — an
+  // admin can re-enable manual bank transfer by setting
+  // BANK_TRANSFER_ENABLED=true.
   isEnabled() {
-    return process.env.BANK_TRANSFER_ENABLED !== "false";
+    return process.env.BANK_TRANSFER_ENABLED === "true";
   }
 
   async createCheckout(ctx: CheckoutContext): Promise<CheckoutResult> {

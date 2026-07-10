@@ -1,0 +1,16 @@
+{
+  "name": "jil-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Watcher + deploy automation for Javed Iqbal Learning Platform",
+  "scripts": {
+    "watch": "node watcher.js",
+    "deploy": "node deploy.js all",
+    "deploy:backend": "node deploy.js backend",
+    "deploy:web": "node deploy.js web",
+    "deploy:marketplace": "node deploy.js marketplace"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0"
+  }
+}

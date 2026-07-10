@@ -4,6 +4,44 @@ import * as express from "express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 
+// Build a CORS origin checker. In production we allow:
+//  - PUBLIC_WEB_URL (the primary web app)
+//  - any origin in CORS_ALLOWED_ORIGINS (comma-separated; e.g. tenant custom
+//    domains + the marketplace app)
+//  - any subdomain of PLATFORM_ROOT_DOMAIN (tenant storefronts)
+type CorsCb = (err: Error | null, allow?: boolean) => void;
+function buildCorsOrigin() {
+  const rootDomain = (process.env.PLATFORM_ROOT_DOMAIN || "")
+    .trim()
+    .toLowerCase();
+  const explicit = (process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const webOrigin = process.env.PUBLIC_WEB_URL;
+  if (webOrigin) explicit.push(webOrigin);
+  const allow = new Set(
+    explicit.map((o) => o.replace(/\/$/, "").toLowerCase()),
+  );
+  return (origin: string | undefined, cb: CorsCb) => {
+    // Same-origin / non-browser requests send no Origin header.
+    if (!origin) return cb(null, true);
+    const normalized = origin.replace(/\/$/, "").toLowerCase();
+    if (allow.has(normalized)) return cb(null, true);
+    if (rootDomain) {
+      try {
+        const host = new URL(origin).hostname.toLowerCase();
+        if (host === rootDomain || host.endsWith("." + rootDomain)) {
+          return cb(null, true);
+        }
+      } catch {
+        // malformed origin -> deny below
+      }
+    }
+    return cb(new Error("Not allowed by CORS"), false);
+  };
+}
+
 async function bootstrap() {
   // rawBody: true exposes req.rawBody so we can verify webhook HMAC signatures
   // (e.g. Whop) over the exact bytes that were signed.
@@ -11,11 +49,11 @@ async function bootstrap() {
   app.setGlobalPrefix("api");
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
-  // In production, restrict CORS to the known web origin.
-  const webOrigin = process.env.PUBLIC_WEB_URL;
+  // In production, restrict CORS to known origins: the primary web app, any
+  // subdomain of the platform root domain (tenant storefronts + marketplace),
+  // and any explicitly allowlisted origin (e.g. tenant custom domains).
   app.enableCors({
-    origin:
-      process.env.NODE_ENV === "production" && webOrigin ? webOrigin : true,
+    origin: process.env.NODE_ENV === "production" ? buildCorsOrigin() : true,
     credentials: true,
   });
   // Capture the raw body alongside parsed JSON/urlencoded bodies so webhook
@@ -39,6 +77,8 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT || 4000);
   // eslint-disable-next-line no-console
-  console.log(`API running on http://localhost:${process.env.PORT || 4000}/api`);
+  console.log(
+    `API running on http://localhost:${process.env.PORT || 4000}/api`,
+  );
 }
 bootstrap();

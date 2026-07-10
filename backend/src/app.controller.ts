@@ -13,8 +13,9 @@ export class AppController {
   // GET /api  -> friendly service banner
   @Get()
   root() {
+    const name = (process.env.PLATFORM_NAME || "10X Platform") + " API";
     return {
-      name: "Prof. Dr. Javed Iqbal Learning Platform API",
+      name,
       status: "ok",
       message: "API is running. See /api/health for status.",
       docsHint:

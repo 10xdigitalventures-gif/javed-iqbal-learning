@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, Spinner, Button, ErrorText } from "@/components/ui";
 import { PageHeader } from "@/components/shell";
+import { useModules } from "@/lib/branding";
 import { BookOpen, GraduationCap, PlayCircle } from "lucide-react";
 
 type Book = {
@@ -62,26 +63,40 @@ function Cover({ url, kind }: { url?: string; kind: "book" | "course" }) {
   );
 }
 
+function progressStyle(pct: number) {
+  return { width: String(Math.min(100, Math.max(0, pct))) + "%" };
+}
+
 function ProgressBar({ percent }: { percent: number }) {
   return (
     <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100">
       <div
         className="h-1.5 rounded-full bg-brand"
-        style={{ width: Math.min(100, Math.max(0, percent)) + "%" }}
+        style={progressStyle(percent)}
       />
     </div>
   );
 }
 
 export default function LibraryPage() {
+  const modules = useModules();
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("novels");
-  const [books, setBooks] = useState<Entitlement[] | null>(null);
+  const [allBooks, setAllBooks] = useState<Entitlement[] | null>(null);
+  const books =
+    allBooks === null
+      ? null
+      : modules.books_language === "both"
+        ? allBooks
+        : allBooks.filter(
+            (e) =>
+              !e.book.language || e.book.language === modules.books_language,
+          );
   const [courses, setCourses] = useState<Enrollment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api<Entitlement[]>("/library")
-      .then(setBooks)
+      .then(setAllBooks)
       .catch((e) => setError(e.message));
     api<Enrollment[]>("/courses/me/enrolled")
       .then(setCourses)

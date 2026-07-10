@@ -11,17 +11,15 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF7A1A"
+      "backgroundColor": "#FF9100"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "plugins": [
       "expo-font",
       [
         "expo-notifications",
         {
-          "color": "#FF7A1A",
+          "color": "#FF9100",
           "defaultChannel": "default"
         }
       ],
@@ -61,7 +59,7 @@
       "package": "com.javediqbal.learning",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FF7A1A"
+        "backgroundColor": "#FF9100"
       },
       "permissions": [
         "android.permission.INTERNET",
@@ -75,7 +73,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiUrl": "https://consulthub.10xdigitalventures.com/api",
+      "apiUrl": "https://api.10xdigitalventures.com/api",
       "eas": {
         "projectId": "431ff4dd-dc8b-43af-8544-511099762aaa"
       }

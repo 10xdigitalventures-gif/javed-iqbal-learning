@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { memberCode } from "@/lib/memberCode";
 import {
   Badge,
   Button,
@@ -191,6 +192,9 @@ export default function AdminClients() {
                       {u.name}
                     </Link>
                     <p className="text-sm text-slate-500">{u.email}</p>
+                    <p className="mt-0.5 font-mono text-[11px] text-slate-400">
+                      {memberCode(u.role, u.id)}
+                    </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1">

@@ -6,10 +6,14 @@ import {
 } from "@nestjs/common";
 import { randomBytes } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
 
 @Injectable()
 export class CertificatesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private ghl: GhlSyncService,
+  ) {}
 
   private webBase() {
     return process.env.PUBLIC_WEB_URL || "http://localhost:3000";
@@ -47,9 +51,32 @@ export class CertificatesService {
     });
     if (existing) return existing;
     const serial = await this.uniqueSerial();
-    return this.prisma.certificate.create({
+    const created = await this.prisma.certificate.create({
       data: { userId, courseId, serial },
     });
+    try {
+      const [user, course] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { email: true, name: true, phone: true },
+        }),
+        this.prisma.course.findUnique({
+          where: { id: courseId },
+          select: { title: true },
+        }),
+      ]);
+      if (user) {
+        this.ghl.onCourseCompleted({
+          email: user.email,
+          name: user.name,
+          phone: user.phone,
+          courseTitle: course?.title,
+        });
+      }
+    } catch {
+      // marketing sync must never block certificate issuance
+    }
+    return created;
   }
 
   // Manual issue (client). Only allowed once the course is fully completed.

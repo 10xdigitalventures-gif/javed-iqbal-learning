@@ -3,9 +3,12 @@
 @tailwind utilities;
 
 :root {
-  --brand: #ff7a1a;
-  --brand-dark: #e25e00;
-  --brand-light: #fff1e6;
+  /* Brand palette as RGB channels so Tailwind's `brand` color supports
+     opacity modifiers (e.g. bg-brand/10) and can be overridden at runtime
+     by the tenant BrandingProvider. Defaults match the original #ff9100. */
+  --brand: 255 145 0;
+  --brand-dark: 224 126 0;
+  --brand-light: 255 243 229;
 }
 
 html,

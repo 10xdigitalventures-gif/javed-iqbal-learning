@@ -1,9 +1,9 @@
 // Prof. Dr. Javed Iqbal Learning App — brand theme.
 // Primary: Orange, Secondary: Black, Background: White / Light Grey.
 export const colors = {
-  brand: "#FF7A1A",
-  brandDark: "#E25E00",
-  brandLight: "#FFF1E6",
+  brand: "#FF9100",
+  brandDark: "#E07E00",
+  brandLight: "#FFF3E5",
   black: "#111114",
   bg: "#F5F6F8",
   card: "#FFFFFF",

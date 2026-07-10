@@ -16,6 +16,7 @@ import {
 } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { AuthProvider, useAuth } from "./src/auth";
+import { loadTenantConfig } from "./src/tenant";
 import { Loading } from "./src/components";
 import { colors } from "./src/theme";
 import { syncActivity } from "./src/activity";
@@ -260,6 +261,8 @@ function Root() {
   // Keep the branded loading screen up for at least 3 seconds on launch.
   const [minSplash, setMinSplash] = useState(true);
   useEffect(() => {
+    // Load tenant config (branding) in parallel with splash timer
+    loadTenantConfig().catch(() => undefined);
     const t = setTimeout(() => setMinSplash(false), 3000);
     return () => clearTimeout(t);
   }, []);

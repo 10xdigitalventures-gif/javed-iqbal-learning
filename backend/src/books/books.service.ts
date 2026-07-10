@@ -164,11 +164,14 @@ export class BooksService {
     featured?: boolean;
     q?: string;
     includeUnpublished?: boolean;
+    language?: string;
   }) {
     const where: any = {};
     if (!opts.includeUnpublished) where.isPublished = true;
     if (opts.categoryId) where.categoryId = opts.categoryId;
     if (opts.featured) where.isFeatured = true;
+    if (opts.language && opts.language !== "both")
+      where.language = opts.language;
     if (opts.q)
       where.OR = [
         { title: { contains: opts.q, mode: "insensitive" } },

@@ -8,14 +8,9 @@ import { MeetingStatus, Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { UsageService } from "../purchases/usage.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
 import { AuthUser } from "../common/access";
-import {
-  BookMeetingDto,
-  RescheduleDto,
-  SetAvailabilityDto,
-} from "./dto";
-
-
+import { BookMeetingDto, RescheduleDto, SetAvailabilityDto } from "./dto";
 
 // ---------------------------------------------------------------------------
 // Google Calendar / Meet auto-link
@@ -30,7 +25,7 @@ async function createGoogleMeetLink(
 ): Promise<string | null> {
   try {
     const saEmail = process.env.GOOGLE_SA_EMAIL;
-    const saKey = (process.env.GOOGLE_SA_KEY || '').replace(/\\n/g, '\n');
+    const saKey = (process.env.GOOGLE_SA_KEY || "").replace(/\\n/g, "\n");
     const delegate = process.env.GOOGLE_CALENDAR_DELEGATE;
     if (!saEmail || !saKey || !delegate) return null;
 
@@ -39,28 +34,28 @@ async function createGoogleMeetLink(
     const payload = {
       iss: saEmail,
       sub: delegate,
-      scope: 'https://www.googleapis.com/auth/calendar',
-      aud: 'https://oauth2.googleapis.com/token',
+      scope: "https://www.googleapis.com/auth/calendar",
+      aud: "https://oauth2.googleapis.com/token",
       iat: now,
       exp: now + 3600,
     };
-    const header = { alg: 'RS256', typ: 'JWT' };
+    const header = { alg: "RS256", typ: "JWT" };
     const b64u = (obj: object) =>
-      Buffer.from(JSON.stringify(obj)).toString('base64url');
-    const unsigned = b64u(header) + '.' + b64u(payload);
+      Buffer.from(JSON.stringify(obj)).toString("base64url");
+    const unsigned = b64u(header) + "." + b64u(payload);
 
-    const { createSign } = await import('crypto');
-    const signer = createSign('RSA-SHA256');
+    const { createSign } = await import("crypto");
+    const signer = createSign("RSA-SHA256");
     signer.update(unsigned);
-    const sig = signer.sign(saKey, 'base64url');
-    const jwt = unsigned + '.' + sig;
+    const sig = signer.sign(saKey, "base64url");
+    const jwt = unsigned + "." + sig;
 
     // Exchange JWT for access token
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
         assertion: jwt,
       }).toString(),
     });
@@ -70,25 +65,30 @@ async function createGoogleMeetLink(
     // Create Calendar event with conferenceData (Google Meet)
     const reqId = `consulthub-${Date.now()}`;
     const eventRes = await fetch(
-      'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
+      "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1",
       {
-        method: 'POST',
+        method: "POST",
         headers: {
           Authorization: `Bearer ${tokenData.access_token}`,
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           summary: title,
           start: { dateTime: startIso },
           end: { dateTime: endIso },
           conferenceData: {
-            createRequest: { requestId: reqId, conferenceSolutionKey: { type: 'hangoutsMeet' } },
+            createRequest: {
+              requestId: reqId,
+              conferenceSolutionKey: { type: "hangoutsMeet" },
+            },
           },
         }),
       },
     );
     const event: any = await eventRes.json();
-    return event?.hangoutLink || event?.conferenceData?.entryPoints?.[0]?.uri || null;
+    return (
+      event?.hangoutLink || event?.conferenceData?.entryPoints?.[0]?.uri || null
+    );
   } catch {
     return null;
   }
@@ -99,6 +99,7 @@ export class MeetingsService {
     private prisma: PrismaService,
     private usage: UsageService,
     private notifications: NotificationsService,
+    private ghl: GhlSyncService,
   ) {}
 
   // --- Availability ---
@@ -141,8 +142,13 @@ export class MeetingsService {
       purchaseId = usable?.id ?? null;
     } else {
       const p = await this.usage.getOrThrow(purchaseId);
-      if (p.clientId !== clientId || (p.consultantId && p.consultantId !== dto.consultantId))
-        throw new ForbiddenException("This package cannot be used for the selected consultant");
+      if (
+        p.clientId !== clientId ||
+        (p.consultantId && p.consultantId !== dto.consultantId)
+      )
+        throw new ForbiddenException(
+          "This package cannot be used for the selected consultant",
+        );
       if (p.status !== "ACTIVE")
         throw new BadRequestException("Package is not active yet");
       if (!this.usage.hasRoom(p, "session"))
@@ -156,7 +162,11 @@ export class MeetingsService {
         purchaseId,
         title: dto.title,
         scheduledAt: new Date(dto.scheduledAt),
-        durationMin: dto.durationMin ?? (purchaseId ? (await this.usage.getOrThrow(purchaseId)).sessionDuration ?? 30 : 30),
+        durationMin:
+          dto.durationMin ??
+          (purchaseId
+            ? ((await this.usage.getOrThrow(purchaseId)).sessionDuration ?? 30)
+            : 30),
         notes: dto.notes,
         status: MeetingStatus.REQUESTED,
       },
@@ -168,6 +178,23 @@ export class MeetingsService {
       body: `${dto.title} — awaiting your approval`,
       email: true,
     });
+    try {
+      const client = await this.prisma.user.findUnique({
+        where: { id: clientId },
+        select: { email: true, name: true, phone: true },
+      });
+      if (client) {
+        this.ghl.onBooking({
+          email: client.email,
+          name: client.name,
+          phone: client.phone,
+          title: dto.title,
+          scheduledAt: meeting.scheduledAt,
+        });
+      }
+    } catch {
+      // marketing sync must never block a booking
+    }
     return meeting;
   }
 
@@ -187,7 +214,9 @@ export class MeetingsService {
     let resolvedUrl = meetingUrl ?? meeting.meetingUrl ?? null;
     if (!resolvedUrl && meeting.scheduledAt) {
       const start = meeting.scheduledAt;
-      const end = new Date(start.getTime() + (meeting.durationMin || 60) * 60000);
+      const end = new Date(
+        start.getTime() + (meeting.durationMin || 60) * 60000,
+      );
       resolvedUrl = await createGoogleMeetLink(
         meeting.title,
         start.toISOString(),
@@ -202,7 +231,8 @@ export class MeetingsService {
         meetingUrl: resolvedUrl ?? meeting.meetingUrl,
       },
     });
-    if (meeting.purchaseId) await this.usage.consume(meeting.purchaseId, "session");
+    if (meeting.purchaseId)
+      await this.usage.consume(meeting.purchaseId, "session");
     await this.notifications.create(meeting.clientId, {
       type: "BOOKING_APPROVED",
       title: "Meeting approved",

@@ -109,6 +109,7 @@ enum OtpPurpose {
 
 model User {
   id        String   @id @default(cuid())
+  tenantId  String?
   email     String   @unique
   password  String
   name      String
@@ -137,6 +138,15 @@ model User {
   // out (Netflix/YouTube style). Admin-configurable per user.
   maxDevices Int      @default(2)
   devices    UserDevice[]
+
+  // Sales attribution / referral (Phase 2 growth engine)
+  referredByCode       String?
+  ownedReferralCodes   ReferralCode[]    @relation("OwnedReferralCodes")
+  buyerAttributions    SaleAttribution[] @relation("BuyerAttributions")
+  referrerAttributions SaleAttribution[] @relation("ReferrerAttributions")
+  earnedCommissions    Commission[]      @relation("EarnedCommissions")
+  referralRewardsGiven    ReferralReward[] @relation("ReferralRewardsGiven")
+  referralRewardsReceived ReferralReward[] @relation("ReferralRewardsReceived")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -198,10 +208,13 @@ model User {
   supportTickets          SupportTicket[]
   supportMessages         SupportMessage[] @relation("SupportMessageSender")
   assignedSupportTickets  SupportTicket[]  @relation("AssignedSupportTickets")
+  @@index([tenantId])
+  @@index([role])
 }
 
 model Package {
   id          String      @id @default(cuid())
+  tenantId  String?
   name        String
   description String?
   type        PackageType    @default(ONE_TIME)
@@ -235,10 +248,12 @@ model Package {
 
   // Consultants this plan is assigned to (ignored when isGlobal = true).
   consultants User[]   @relation("PackageConsultants")
+  @@index([tenantId])
 }
 
 model Purchase {
   id           String         @id @default(cuid())
+  tenantId  String?
   clientId     String
   consultantId String?
   packageId    String
@@ -275,6 +290,10 @@ model Purchase {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([consultantId])
+  @@index([status])
 }
 
 model Conversation {
@@ -319,6 +338,8 @@ model Message {
   replyTo      Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
   replies      Message[]    @relation("MessageReplies")
   reactions    MessageReaction[]
+  @@index([conversationId])
+  @@index([senderId])
 }
 
 model MessageReaction {
@@ -362,10 +383,14 @@ model Meeting {
   client     User      @relation("ClientMeetings", fields: [clientId], references: [id])
   consultant User      @relation("ConsultantMeetings", fields: [consultantId], references: [id])
   purchase   Purchase? @relation(fields: [purchaseId], references: [id])
+  @@index([consultantId])
+  @@index([clientId])
+  @@index([status])
 }
 
 model Payment {
   id         String        @id @default(cuid())
+  tenantId  String?
   userId     String
   purchaseId String?
   amount     Float
@@ -375,6 +400,7 @@ model Payment {
   status     PaymentStatus @default(PENDING)
   reference  String?
   invoiceNo  String?
+  receiptNo  String?        @unique
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
@@ -396,6 +422,10 @@ model Payment {
   purchase Purchase? @relation(fields: [purchaseId], references: [id])
   order    Order?    @relation(fields: [orderId], references: [id])
   hardCopy HardCopyOrder? @relation(fields: [hardCopyOrderId], references: [id])
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@index([status, createdAt])
 }
 
 model Notification {
@@ -409,6 +439,8 @@ model Notification {
   createdAt DateTime            @default(now())
 
   user User @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@index([read])
 }
 
 // Per-user delivery preferences for notifications. One row per user; created
@@ -431,6 +463,7 @@ model NotificationPreference {
 
 model Community {
   id          String   @id @default(cuid())
+  tenantId  String?
   name        String
   description String?
   isPaid      Boolean  @default(false)
@@ -443,6 +476,7 @@ model Community {
   posts   CommunityPost[]
   orders  Order[]
   offers  CommunityOffer[]
+  @@index([tenantId])
 }
 
 model CommunityMember {
@@ -622,6 +656,7 @@ model BookCategory {
 
 model Book {
   id          String  @id @default(cuid())
+  tenantId  String?
   title       String
   slug        String  @unique
   author      String  @default("Prof. Dr. Javed Iqbal")
@@ -671,6 +706,7 @@ model Book {
   readerNotes     ReaderNote[]
   orders          Order[]
   hardCopyOrders  HardCopyOrder[]
+  @@index([tenantId])
 }
 
 model Chapter {
@@ -699,6 +735,7 @@ model Chapter {
 
 model Bundle {
   id          String  @id @default(cuid())
+  tenantId  String?
   title       String
   slug        String  @unique
   description String?
@@ -713,6 +750,7 @@ model Bundle {
   items  BundleItem[]
   orders Order[]
   offers BundleOffer[]
+  @@index([tenantId])
 }
 
 model BundleItem {
@@ -731,6 +769,7 @@ model BundleItem {
 // Entitlement / Subscription records.
 model Order {
   id       String              @id @default(cuid())
+  tenantId  String?
   userId   String
   kind     LearningProductKind
   status   OrderStatus         @default(PENDING)
@@ -758,6 +797,9 @@ model Order {
   course   Course?          @relation(fields: [courseId], references: [id])
   community Community?       @relation(fields: [communityId], references: [id])
   payments Payment[]
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
 }
 
 // "My Books": a user's access grant to a single book. expiresAt is null for
@@ -867,6 +909,7 @@ model ReaderNote {
 
 model SubscriptionPlan {
   id          String               @id @default(cuid())
+  tenantId  String?
   name        String
   description String?
   interval    SubscriptionInterval @default(MONTHLY)
@@ -881,10 +924,12 @@ model SubscriptionPlan {
 
   subscriptions Subscription[]
   orders        Order[]
+  @@index([tenantId])
 }
 
 model Subscription {
   id        String             @id @default(cuid())
+  tenantId  String?
   userId    String
   planId    String
   status    SubscriptionStatus @default(PENDING)
@@ -902,10 +947,12 @@ model Subscription {
 
   user User             @relation(fields: [userId], references: [id])
   plan SubscriptionPlan @relation(fields: [planId], references: [id])
+  @@index([tenantId])
 }
 
 model HardCopyOrder {
   id           String              @id @default(cuid())
+  tenantId  String?
   userId       String
   bookId       String?
   name         String
@@ -928,6 +975,7 @@ model HardCopyOrder {
   user     User      @relation(fields: [userId], references: [id])
   book     Book?     @relation(fields: [bookId], references: [id])
   payments Payment[]
+  @@index([tenantId])
 }
 
 model CommunityPostLike {
@@ -991,6 +1039,7 @@ model CourseModule {
 
 model Course {
   id          String  @id @default(cuid())
+  tenantId  String?
   title       String
   slug        String  @unique
   description String?
@@ -1037,6 +1086,7 @@ model Course {
   comments     CourseComment[]
   badges       CourseBadge[]
   liveSessions LiveSession[]
+  @@index([tenantId])
 }
 
 model Lesson {
@@ -1308,6 +1358,7 @@ model UserGameStat {
   id            String   @id @default(cuid())
   userId        String   @unique
   points        Int      @default(0)
+  bonusPoints   Int      @default(0)
   currentStreak Int      @default(0)
   longestStreak Int      @default(0)
   // Last active calendar day as a YYYY-MM-DD string in the learner's local tz.
@@ -1389,6 +1440,7 @@ model CourseOffer {
 // currency units).
 model Coupon {
   id             String    @id @default(cuid())
+  tenantId  String?
   code           String    @unique
   discountType   String    @default("PERCENT")
   amount         Float     @default(0)
@@ -1398,6 +1450,7 @@ model Coupon {
   timesRedeemed  Int       @default(0)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  @@index([tenantId])
 }
 
 // A learner comment / discussion entry at the course level (optionally pinned
@@ -1569,4 +1622,166 @@ model SupportMessage {
   sender User          @relation("SupportMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
+}
+
+// ---------------------------------------------------------------------------
+// Multi-tenancy (white-label engine). Each Tenant is one expert/brand running
+// on the platform (e.g. Dr. Javed Iqbal, Dr. Zeeshan Usmani). Existing data is
+// backfilled to a single default tenant, so single-tenant behaviour is
+// preserved until per-tenant scoping is switched on module by module.
+model Tenant {
+  id           String  @id @default(cuid())
+  slug         String  @unique // subdomain key, e.g. drjaved / drzeeshan
+  name         String
+  customDomain String? @unique // optional vanity domain
+  isActive     Boolean @default(true)
+  isDefault    Boolean @default(false) // the fallback tenant
+  listed       Boolean @default(true) // visible in the public marketplace
+
+  // Branding / theming (per-tenant white-label)
+  brandName      String?
+  logoUrl        String?
+  logoDarkUrl    String?
+  faviconUrl     String?
+  primaryColor   String?
+  secondaryColor String?
+  accentColor    String?
+  fontFamily     String?
+  tagline        String?
+  category       String?  // expert domain/focus area for marketplace discovery
+  supportEmail   String?
+
+  // Per-tenant feature/module switches, e.g. { "community": true }
+  moduleFlags Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customDomain])
+  @@index([category])
+}
+
+// ---- Sales attribution + referral commissions (Phase 2 growth engine) ----
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  VOID
+}
+
+model ReferralCode {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  code        String   @unique
+  ownerUserId String
+  ratePercent Float    @default(10)
+  active      Boolean  @default(true)
+  note        String?
+  clicks      Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner        User              @relation("OwnedReferralCodes", fields: [ownerUserId], references: [id])
+  attributions SaleAttribution[]
+  commissions  Commission[]
+  @@index([tenantId])
+  @@index([ownerUserId])
+}
+
+model SaleAttribution {
+  id             String   @id @default(cuid())
+  tenantId       String?
+  paymentId      String   @unique
+  orderId        String?
+  buyerUserId    String
+  referralCodeId String?
+  referrerUserId String?
+  assistedById   String?
+  channel        String   @default("DIRECT")
+  amount         Float
+  currency       String   @default("PKR")
+  landingUrl     String?
+  createdAt      DateTime @default(now())
+
+  referralCode ReferralCode? @relation(fields: [referralCodeId], references: [id])
+  buyer        User          @relation("BuyerAttributions", fields: [buyerUserId], references: [id])
+  referrer     User?         @relation("ReferrerAttributions", fields: [referrerUserId], references: [id])
+  commission   Commission?
+  @@index([tenantId])
+  @@index([referrerUserId])
+  @@index([buyerUserId])
+}
+
+model Commission {
+  id             String           @id @default(cuid())
+  tenantId       String?
+  attributionId  String?          @unique
+  referralCodeId String?
+  paymentId      String
+  beneficiaryId  String
+  baseAmount     Float
+  ratePercent    Float
+  amount         Float
+  currency       String           @default("PKR")
+  status         CommissionStatus @default(PENDING)
+  note           String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  attribution  SaleAttribution? @relation(fields: [attributionId], references: [id])
+  referralCode ReferralCode?    @relation(fields: [referralCodeId], references: [id])
+  beneficiary  User             @relation("EarnedCommissions", fields: [beneficiaryId], references: [id])
+  @@index([tenantId])
+  @@index([beneficiaryId])
+  @@index([status])
+}
+
+model ReferralReward {
+  id             String   @id @default(cuid())
+  tenantId       String?
+  paymentId      String   @unique
+  referrerUserId String
+  referredUserId String
+  referrerPoints Int      @default(0)
+  referredPoints Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  referrer User @relation("ReferralRewardsGiven", fields: [referrerUserId], references: [id])
+  referred User @relation("ReferralRewardsReceived", fields: [referredUserId], references: [id])
+  @@index([tenantId])
+  @@index([referrerUserId])
+  @@index([referredUserId])
+}
+
+// ---- Revenue reconciliation (Phase 2 growth engine) ----
+
+model ExternalRevenue {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  source    String   @default("GHL")
+  period    String
+  amount    Float
+  currency  String   @default("PKR")
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  @@index([tenantId])
+  @@index([period])
+}
+
+model MonthlyClose {
+  id              String   @id @default(cuid())
+  tenantId        String?
+  period          String
+  appRevenue      Float
+  externalRevenue Float
+  totalRevenue    Float
+  commissionTotal Float
+  currency        String   @default("PKR")
+  breakdown       Json?
+  closedBy        String?
+  closedAt        DateTime @default(now())
+  @@unique([tenantId, period])
+  @@index([tenantId])
 }

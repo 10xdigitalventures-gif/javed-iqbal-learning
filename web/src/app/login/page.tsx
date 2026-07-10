@@ -31,6 +31,12 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-md">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/logo-dark.png"
+          alt="Dr. Javed Iqbal"
+          className="mb-5 h-10 w-auto"
+        />
         <h1 className="mb-1 text-2xl font-bold text-brand">Welcome back</h1>
         <p className="mb-6 text-sm text-slate-500">
           Sign in to your consultation account

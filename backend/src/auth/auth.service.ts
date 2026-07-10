@@ -8,6 +8,8 @@ import { OtpPurpose, Role } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
+import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
+import { AttributionService } from "../attribution/attribution.service";
 import {
   ChangePasswordDto,
   LoginDto,
@@ -21,6 +23,8 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private mail: MailService,
+    private ghl: GhlSyncService,
+    private attribution: AttributionService,
   ) {}
 
   private sign(
@@ -131,7 +135,10 @@ export class AuthService {
     };
   }
 
-  async register(dto: RegisterDto, device?: { deviceId?: string; label?: string; platform?: string }) {
+  async register(
+    dto: RegisterDto,
+    device?: { deviceId?: string; label?: string; platform?: string },
+  ) {
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -150,11 +157,22 @@ export class AuthService {
       },
     });
     await this.logActivity(user.id, "REGISTER");
+    this.ghl.onUserRegistered({
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+    });
+    if (dto.ref) {
+      await this.attribution.attachSignupReferral(user.id, dto.ref);
+    }
     const did = await this.registerDevice(user.id, device);
     return { token: this.sign(user, did), user: this.publicUser(user) };
   }
 
-  async login(dto: LoginDto, device?: { deviceId?: string; label?: string; platform?: string }) {
+  async login(
+    dto: LoginDto,
+    device?: { deviceId?: string; label?: string; platform?: string },
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -190,7 +208,11 @@ export class AuthService {
     return { sent: true };
   }
 
-  async verifyOtp(email: string, code: string, device?: { deviceId?: string; label?: string; platform?: string }) {
+  async verifyOtp(
+    email: string,
+    code: string,
+    device?: { deviceId?: string; label?: string; platform?: string },
+  ) {
     const otp = await this.consumeOtp(email, code, OtpPurpose.LOGIN);
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) throw new UnauthorizedException("Invalid code");
@@ -234,11 +256,7 @@ export class AuthService {
     return this.publicUser(user);
   }
 
-  private async consumeOtp(
-    email: string,
-    code: string,
-    purpose: OtpPurpose,
-  ) {
+  private async consumeOtp(email: string, code: string, purpose: OtpPurpose) {
     const otp = await this.prisma.otpCode.findFirst({
       where: { email, code, purpose, used: false },
       orderBy: { createdAt: "desc" },

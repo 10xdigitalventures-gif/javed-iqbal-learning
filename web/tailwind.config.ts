@@ -6,9 +6,12 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          DEFAULT: "#FF7A1A",
-          dark: "#E25E00",
-          light: "#FFF1E6",
+          // Driven by CSS variables (globals.css) so the palette can be
+          // themed per tenant at runtime. <alpha-value> keeps opacity
+          // modifiers such as bg-brand/10 working.
+          DEFAULT: "rgb(var(--brand) / <alpha-value>)",
+          dark: "rgb(var(--brand-dark) / <alpha-value>)",
+          light: "rgb(var(--brand-light) / <alpha-value>)",
         },
       },
       fontFamily: {

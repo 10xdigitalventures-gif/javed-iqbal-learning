@@ -11,6 +11,8 @@ import { PurchasesService } from "../purchases/purchases.service";
 import { OrdersService } from "../orders/orders.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PaymentProvidersService } from "./payment-providers.service";
+import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
+import { AttributionService } from "../attribution/attribution.service";
 import {
   CheckoutContext,
   CheckoutResult,
@@ -24,6 +26,8 @@ export class PaymentsService {
     private orders: OrdersService,
     private notifications: NotificationsService,
     private providers: PaymentProvidersService,
+    private ghl: GhlSyncService,
+    private attribution: AttributionService,
   ) {}
 
   // Gateways the client may choose from at checkout.
@@ -102,9 +106,22 @@ export class PaymentsService {
     if (!payment) throw new NotFoundException("Payment not found");
     if (payment.status === PaymentStatus.PAID) return payment;
 
+    // Assign trackable document numbers. invoiceNo is normally set at creation;
+    // guarantee one here, and mint a unique receiptNo the first time a payment
+    // is marked PAID so every receipt can be tracked/looked up.
+    const stamp = Date.now().toString(36).toUpperCase();
+    const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+    const data: {
+      status: PaymentStatus;
+      reference?: string;
+      invoiceNo?: string;
+      receiptNo?: string;
+    } = { status: PaymentStatus.PAID, reference };
+    if (!payment.invoiceNo) data.invoiceNo = "INV-" + stamp;
+    if (!payment.receiptNo) data.receiptNo = "RCPT-" + stamp + "-" + rand;
     const updated = await this.prisma.payment.update({
       where: { id: paymentId },
-      data: { status: PaymentStatus.PAID, reference },
+      data,
     });
     if (payment.purchaseId) {
       await this.purchases.activate(payment.purchaseId);
@@ -127,6 +144,37 @@ export class PaymentsService {
       body: `Your payment of ${payment.currency} ${payment.amount} was received.`,
       email: true,
     });
+    // Post-purchase GHL sync for nurture automations (fire-and-forget).
+    try {
+      const buyer = await this.prisma.user.findUnique({
+        where: { id: payment.userId },
+        select: { email: true, name: true, phone: true },
+      });
+      if (buyer) {
+        this.ghl.onPurchase({
+          email: buyer.email,
+          name: buyer.name,
+          phone: buyer.phone,
+          amount: payment.amount,
+          currency: payment.currency,
+        });
+      }
+    } catch {
+      // never block payment confirmation on marketing sync
+    }
+    // Sales attribution + referral commission (fire-and-forget).
+    try {
+      await this.attribution.recordSale({
+        paymentId: payment.id,
+        buyerUserId: payment.userId,
+        amount: payment.amount,
+        currency: payment.currency,
+        tenantId: payment.tenantId,
+        orderId: payment.orderId,
+      });
+    } catch {
+      // attribution must never block payment confirmation
+    }
     return updated;
   }
 
@@ -262,7 +310,13 @@ export class PaymentsService {
   listForUser(userId: string) {
     return this.prisma.payment.findMany({
       where: { userId },
-      include: { purchase: { include: { package: true } } },
+      include: {
+        purchase: { include: { package: true } },
+        order: {
+          include: { book: true, bundle: true, plan: true, course: true },
+        },
+        hardCopy: { include: { book: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
   }

@@ -14,6 +14,7 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
 import { CreateOrderDto } from "./dto";
+import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
 
 // Commerce for digital products (books, bundles, subscription plans). Creates a
 // PENDING Order + PENDING Payment; the payment webhook later calls fulfill(),
@@ -21,7 +22,10 @@ import { CreateOrderDto } from "./dto";
 // two commerce flows stay consistent.
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private ghl: GhlSyncService,
+  ) {}
 
   async create(userId: string, dto: CreateOrderDto) {
     let amount = 0;
@@ -262,6 +266,28 @@ export class OrdersService {
       order.planId
     ) {
       await this.grantSubscription(order.userId, order.planId);
+      try {
+        const [buyer, plan] = await Promise.all([
+          this.prisma.user.findUnique({
+            where: { id: order.userId },
+            select: { email: true, name: true, phone: true },
+          }),
+          this.prisma.subscriptionPlan.findUnique({
+            where: { id: order.planId },
+            select: { name: true },
+          }),
+        ]);
+        if (buyer) {
+          this.ghl.onSubscription({
+            email: buyer.email,
+            name: buyer.name,
+            phone: buyer.phone,
+            planName: plan?.name,
+          });
+        }
+      } catch {
+        // marketing sync must never block fulfillment
+      }
     } else if (order.kind === LearningProductKind.COURSE && order.courseId) {
       // Compute the access window from the course default duration (if any).
       const courseRow = await this.prisma.course.findUnique({

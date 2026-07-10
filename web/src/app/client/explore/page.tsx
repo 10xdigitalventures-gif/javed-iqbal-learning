@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useModules } from "@/lib/branding";
 import { Card, Spinner, Badge, Input, ErrorText } from "@/components/ui";
 import { PageHeader } from "@/components/shell";
 import { BookOpen, GraduationCap, Headphones, Search } from "lucide-react";
@@ -98,13 +99,16 @@ function CoverArt({ item }: { item: Item }) {
 
 export default function ExplorePage() {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("all");
+  const modules = useModules();
   const [books, setBooks] = useState<Book[] | null>(null);
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<Book[]>("/books")
+    api<Book[]>(
+      `/books${modules.books_language !== "both" ? `?language=${modules.books_language}` : ""}`,
+    )
       .then(setBooks)
       .catch((e) => setError(e.message));
     api<Course[]>("/courses")

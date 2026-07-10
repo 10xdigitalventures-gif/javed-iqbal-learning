@@ -137,6 +137,7 @@ export class PaymentsController {
   }
 
   // Paginated / searchable / sortable list for the admin payments table.
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @Get("all/paged")
   allPaged(

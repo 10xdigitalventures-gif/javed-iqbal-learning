@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "10X Marketplace",
+    "slug": "10x-marketplace",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF9100"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tenxdigitalventures.marketplace"
+    },
+    "android": {
+      "package": "com.tenxdigitalventures.marketplace",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FF9100"
+      },
+      "permissions": [
+        "android.permission.INTERNET"
+      ]
+    },
+    "extra": {
+      "apiUrl": "https://api.10xdigitalventures.com/api",
+      "rootDomain": "10xdigitalventures.com",
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}

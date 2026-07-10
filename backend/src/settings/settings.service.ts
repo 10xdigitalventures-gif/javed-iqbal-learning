@@ -9,7 +9,7 @@ const DEFAULTS: Record<string, string> = {
   meetingDurations: "15,30,60",
   audioMaxSeconds: "90",
   videoMaxSeconds: "120",
-  brandColor: "#FF7A1A",
+  brandColor: "#FF9100",
   // In-app branding logo shown inside the apps: "picture" (Prof. Dr. Javed
   // Iqbal photo) or "icon" (app monogram). Admin-switchable, global.
   brandingMode: "picture",
@@ -24,6 +24,15 @@ const DEFAULTS: Record<string, string> = {
     "Focus: stays on the current book and chapter and never invents facts beyond the text. " +
     "Extras: when helpful, offers a short summary, key terms, and one reflection question.",
   aiEnabled: "true",
+  // LeadConnector (HighLevel) chat widget — public so the web app can embed it.
+  // Configure under Admin → Settings → LeadConnector.
+  leadConnectorEnabled: "false",
+  leadConnectorWidgetId: "",
+  leadConnectorLoaderUrl: "https://widgets.leadconnectorhq.com/loader.js",
+  leadConnectorResourcesUrl:
+    "https://widgets.leadconnectorhq.com/chat-widget/loader.js",
+  leadConnectorLocationId: "",
+  leadConnectorLocationName: "",
 };
 
 // Sensitive, environment-style configuration the admin can manage from the
@@ -41,6 +50,40 @@ export type EnvGroup = {
 };
 
 const ENV_GROUPS: EnvGroup[] = [
+  {
+    key: "leadconnector",
+    title: "LeadConnector (HighLevel)",
+    hint: "Create a LeadConnector Marketplace app, paste its Client ID + Secret here, and set the app Redirect URL to <your API URL>/leadconnector/callback. Then use Connect below.",
+    fields: [
+      {
+        key: "LEADCONNECTOR_CLIENT_ID",
+        label: "LeadConnector \u2013 Client ID",
+      },
+      {
+        key: "LEADCONNECTOR_CLIENT_SECRET",
+        label: "LeadConnector \u2013 Client Secret",
+        secret: true,
+      },
+      {
+        key: "LEADCONNECTOR_MCP_URL",
+        label: "LeadConnector \u2013 MCP server URL",
+      },
+      {
+        key: "LEADCONNECTOR_MCP_TOKEN",
+        label: "LeadConnector \u2013 Private Integration Token (MCP)",
+        secret: true,
+      },
+      {
+        key: "GHL_SYNC_ENABLED",
+        label:
+          "Outbound event sync to GHL - enabled? (true / false; default off)",
+      },
+      {
+        key: "GHL_INACTIVE_DAYS",
+        label: "Inactive contact threshold in days (default 30)",
+      },
+    ],
+  },
   {
     key: "ai",
     title: "Hawwa AI provider",
@@ -63,6 +106,15 @@ const ENV_GROUPS: EnvGroup[] = [
       {
         key: "PAYMENT_PROVIDERS",
         label: "Enabled providers (comma-separated)",
+      },
+      {
+        key: "BANK_TRANSFER_ENABLED",
+        label: "Manual bank transfer - enabled? (true / false; default off)",
+      },
+      {
+        key: "HARDCOPY_COD_ENABLED",
+        label:
+          "Hard-copy Cash on Delivery - enabled? (true / false; default off)",
       },
       { key: "GOPAYFAST_MERCHANT_ID", label: "PayFast \u2013 Merchant ID" },
       {

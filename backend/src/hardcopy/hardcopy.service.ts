@@ -31,6 +31,15 @@ export class HardCopyService {
   async create(userId: string, dto: CreateHardCopyOrderDto) {
     const method = (dto.paymentMethod || "cod").toLowerCase();
 
+    // COD is OFF by default (10X app direction: app pays via card/PayFast
+    // only, instant access). The path is not removed — set
+    // HARDCOPY_COD_ENABLED=true to allow cash on delivery again.
+    if (method === "cod" && process.env.HARDCOPY_COD_ENABLED !== "true") {
+      throw new BadRequestException(
+        "Cash on Delivery is currently disabled. Please pay by card / PayFast.",
+      );
+    }
+
     // Price the physical order from the book hardCopyPrice (server is the source
     // of truth) x quantity.
     let unitPrice = 0;

@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Platform (10X) brand palette as RGB channels (matches #ff9100 default). */
+  --brand: 255 145 0;
+  --brand-dark: 224 126 0;
+  --brand-light: 255 243 229;
+}
+
+body {
+  font-family: Inter, system-ui, sans-serif;
+  background: #f7f7f9;
+  color: #15151a;
+}

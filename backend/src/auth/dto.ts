@@ -37,6 +37,11 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   devicePlatform?: string;
+
+  // Referral code captured from ?ref= on the signup link (Phase 2).
+  @IsOptional()
+  @IsString()
+  ref?: string;
 }
 
 export class LoginDto {

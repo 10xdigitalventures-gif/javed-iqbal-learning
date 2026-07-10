@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -28,6 +28,12 @@ import { GamificationModule } from "./gamification/gamification.module";
 import { MailModule } from "./mail/mail.module";
 import { StorageModule } from "./storage/storage.module";
 import { SupportModule } from "./support/support.module";
+import { LeadConnectorModule } from "./leadconnector/leadconnector.module";
+import { GhlSyncModule } from "./ghl-sync/ghl-sync.module";
+import { AttributionModule } from "./attribution/attribution.module";
+import { ReconciliationModule } from "./reconciliation/reconciliation.module";
+import { TenantModule } from "./tenant/tenant.module";
+import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
 import { AppController } from "./app.controller";
 
 @Module({
@@ -39,6 +45,7 @@ import { AppController } from "./app.controller";
       },
     ]),
     PrismaModule,
+    TenantModule,
     RealtimeModule,
     MailModule,
     AuthModule,
@@ -63,10 +70,18 @@ import { AppController } from "./app.controller";
     MediaModule,
     StorageModule,
     SupportModule,
+    LeadConnectorModule,
+    GhlSyncModule,
+    AttributionModule,
+    ReconciliationModule,
     AiModule,
     GamificationModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(TenantContextMiddleware).forRoutes("*");
+  }
+}
