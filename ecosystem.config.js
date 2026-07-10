@@ -77,5 +77,15 @@ module.exports = {
       out_file: log("git-push", "out"),
       error_file: log("git-push", "error"),
     },
+    {
+  ...common,
+  name: "jil-cloudflared",
+  cwd: "C:\\Users\\User\\.cloudflared",
+  script: "cloudflared",
+  args: "tunnel --config C:\\Users\\User\\.cloudflared\\config.yml run jil",
+  max_memory_restart: "200M",
+  out_file: "E:\\Programs\\javed-iqbal-learning-platform\\consultant-platform\\logs\\cloudflared-out.log",
+  error_file: "E:\\Programs\\javed-iqbal-learning-platform\\consultant-platform\\logs\\cloudflared-error.log",
+},
   ],
 };
