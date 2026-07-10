@@ -13,6 +13,7 @@ type Book = {
   title: string;
   author: string;
   coverUrl?: string;
+  language?: string;
 };
 
 type Entitlement = {
