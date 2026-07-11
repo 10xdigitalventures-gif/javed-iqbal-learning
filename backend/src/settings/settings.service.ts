@@ -64,6 +64,12 @@ const ENV_GROUPS: EnvGroup[] = [
         label: "LeadConnector \u2013 Client Secret",
         secret: true,
       },
+
+      {
+        key: "LEADCONNECTOR_SSO_KEY",
+        label: "LeadConnector – SSO Key (white-label login)",
+        secret: true,
+      },
       {
         key: "LEADCONNECTOR_MCP_URL",
         label: "LeadConnector \u2013 MCP server URL",

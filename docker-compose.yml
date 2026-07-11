@@ -28,8 +28,8 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://postgres:postgres@db:5432/consult_hub?schema=public
       JWT_SECRET: change-me-in-production
-      PUBLIC_WEB_URL: http://localhost:3000
-      PUBLIC_API_URL: http://localhost:4000/api
+      PUBLIC_WEB_URL: https://app.mentoringhub.online
+      PUBLIC_API_URL: https://api.mentoringhub.online/api
       UPLOAD_DIR: /app/uploads
     ports:
       - "4000:4000"
@@ -42,7 +42,7 @@ services:
     depends_on:
       - backend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:4000/api
+      NEXT_PUBLIC_API_URL: https://api.mentoringhub.online/api
     ports:
       - "3000:3000"
 

@@ -335,6 +335,16 @@ export default function AdminSettings() {
                 setEnvValue("LEADCONNECTOR_CLIENT_SECRET", e.target.value)
               }
             />
+
+            <Input
+              label="SSO Key"
+              type="password"
+              placeholder="••••••"
+              value={env?.values.LEADCONNECTOR_SSO_KEY || ''}
+              onChange={(e) =>
+                setEnvValue('LEADCONNECTOR_SSO_KEY', e.target.value)
+              }
+            />
           </div>
           <p className="text-xs text-gray-500">
             In your LeadConnector Marketplace app, set the Redirect URL to{" "}
