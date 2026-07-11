@@ -31,8 +31,8 @@
       ]
     },
     "extra": {
-      "apiUrl": "https://api.10xdigitalventures.com/api",
-      "rootDomain": "10xdigitalventures.com",
+      "apiUrl": "https://api.mentoringhub.online/api",
+      "rootDomain": "mentoringhub.online",
       "eas": {
         "projectId": ""
       }

@@ -32,7 +32,6 @@
       }
     },
     "tenant-template": {
-      "_comment": "Copy and rename this profile per tenant. Set all EXPO_PUBLIC_* vars.",
       "distribution": "internal",
       "android": {
         "image": "ubuntu-24.04-jdk-17-ndk-r27b",
@@ -44,7 +43,7 @@
         "EXPO_PUBLIC_APP_SLUG": "my-expert-app",
         "EXPO_PUBLIC_BUNDLE_ID": "com.example.myexpertapp",
         "EXPO_PUBLIC_ANDROID_PKG": "com.example.myexpertapp",
-        "EXPO_PUBLIC_API_URL": "https://api.10xdigitalventures.com/api",
+        "EXPO_PUBLIC_API_URL": "https://api.mentoringhub.online/api",
         "EXPO_PUBLIC_TENANT_SLUG": "my-expert-slug",
         "EXPO_PUBLIC_BRAND_COLOR": "#FF9100",
         "EAS_PROJECT_ID": "YOUR-EAS-PROJECT-ID"

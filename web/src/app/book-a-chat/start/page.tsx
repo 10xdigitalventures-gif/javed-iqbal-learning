@@ -10,7 +10,7 @@ export default function StartPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const branding = useBranding();
-  const brand = branding?.brandName || "10X Digital Ventures";
+  const brand = branding.brandName || "10X Digital Ventures";
 
   useEffect(() => {
     if (loading) return;
