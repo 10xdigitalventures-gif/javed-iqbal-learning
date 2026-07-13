@@ -7,10 +7,14 @@ import {
 import { PaymentKind, PurchaseStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreatePurchaseDto } from "./dto";
+import { PayoutsService } from "../payouts/payouts.service";
 
 @Injectable()
 export class PurchasesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private payouts: PayoutsService,
+  ) {}
 
   // Create a PENDING purchase + PENDING payment. Activation happens after the
   // payment webhook confirms (or immediately in mock mode via markPaid).
@@ -82,10 +86,29 @@ export class PurchasesService {
 
   // Activate a purchase once its payment is confirmed.
   async activate(purchaseId: string) {
-    return this.prisma.purchase.update({
+    const purchase = await this.prisma.purchase.update({
       where: { id: purchaseId },
       data: { status: PurchaseStatus.ACTIVE },
+      include: {
+        package: { select: { name: true, price: true, currency: true } },
+      },
     });
+
+    // Record a revenue payout for the selling consultant/tenant (non-fatal).
+    if (purchase.tenantId && purchase.package && purchase.package.price > 0) {
+      await this.payouts.recordSale({
+        tenantId: purchase.tenantId,
+        ownerUserId: purchase.consultantId ?? null,
+        purchaseId: purchase.id,
+        productKind: "PACKAGE",
+        productId: purchase.packageId,
+        productName: purchase.package.name,
+        grossAmount: purchase.package.price,
+        currency: purchase.package.currency,
+      });
+    }
+
+    return purchase;
   }
 
   listForClient(clientId: string) {
@@ -125,6 +148,31 @@ export class PurchasesService {
     });
     if (!p) throw new NotFoundException("Purchase not found");
     return p;
+  }
+
+  async getForUser(user: { userId: string; role: string }, id: string) {
+    const purchase = await this.get(id);
+    if (user.role === "ADMIN") return purchase;
+    if (
+      purchase.clientId === user.userId ||
+      purchase.consultantId === user.userId
+    ) {
+      return purchase;
+    }
+    throw new ForbiddenException("This purchase belongs to someone else");
+  }
+
+  async cancelForUser(user: { userId: string; role: string }, id: string) {
+    const purchase = await this.getForUser(user, id);
+    if (user.role !== "ADMIN" && purchase.clientId !== user.userId) {
+      throw new ForbiddenException(
+        "Only the buyer or admin can cancel this purchase",
+      );
+    }
+    return this.prisma.purchase.update({
+      where: { id },
+      data: { status: PurchaseStatus.CANCELLED, autoRenew: false },
+    });
   }
 
   // Admin "Book a Chat" view: every one-time SINGLE consultation purchase with

@@ -77,6 +77,9 @@ export class ActivityController {
     @Query("q") q?: string,
     @Query("action") action?: string,
     @Query("userId") userId?: string,
+    @Query("tenantId") tenantId?: string,
+    @Query("entity") entity?: string,
+    @Query("entityId") entityId?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("page") page?: string,
@@ -86,6 +89,9 @@ export class ActivityController {
       q,
       action,
       userId,
+      tenantId,
+      entity,
+      entityId,
       from,
       to,
       page,
@@ -110,10 +116,22 @@ export class ActivityController {
     @Query("q") q?: string,
     @Query("action") action?: string,
     @Query("userId") userId?: string,
+    @Query("tenantId") tenantId?: string,
+    @Query("entity") entity?: string,
+    @Query("entityId") entityId?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
   ) {
-    const csv = await this.service.exportCsv({ q, action, userId, from, to });
+    const csv = await this.service.exportCsv({
+      q,
+      action,
+      userId,
+      tenantId,
+      entity,
+      entityId,
+      from,
+      to,
+    });
     res.send(csv);
   }
 

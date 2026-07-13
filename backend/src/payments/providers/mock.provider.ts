@@ -14,7 +14,10 @@ export class MockProvider implements PaymentProvider {
   readonly name = "mock";
 
   isEnabled() {
-    return true;
+    return (
+      process.env.NODE_ENV !== "production" ||
+      process.env.ENABLE_MOCK_PAYMENTS === "true"
+    );
   }
 
   async createCheckout(ctx: CheckoutContext): Promise<CheckoutResult> {
@@ -25,9 +28,7 @@ export class MockProvider implements PaymentProvider {
     };
   }
 
-  async handleWebhook(
-    payload: Record<string, any>,
-  ): Promise<WebhookResult> {
+  async handleWebhook(payload: Record<string, any>): Promise<WebhookResult> {
     const paymentId = payload.paymentId || payload.m_payment_id;
     return { paymentId, status: "PAID", reference: "MOCK-" + Date.now() };
   }

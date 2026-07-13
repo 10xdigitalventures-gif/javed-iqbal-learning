@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -15,6 +16,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { Paginated, parsePagination, buildOrderBy } from "../common/list-query";
 import { CreateOrderDto } from "./dto";
 import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
+import { PayoutsService } from "../payouts/payouts.service";
 
 // Commerce for digital products (books, bundles, subscription plans). Creates a
 // PENDING Order + PENDING Payment; the payment webhook later calls fulfill(),
@@ -25,6 +27,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private ghl: GhlSyncService,
+    private payouts: PayoutsService,
   ) {}
 
   async create(userId: string, dto: CreateOrderDto) {
@@ -328,10 +331,41 @@ export class OrdersService {
       });
     }
 
-    return this.prisma.order.update({
+    const paid = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: OrderStatus.PAID },
     });
+
+    // Record a revenue payout (owner net + platform fee). Non-fatal: never
+    // blocks fulfillment. Only content that belongs to a tenant is split.
+    if (order.tenantId && order.amount > 0) {
+      const productName = order.courseId
+        ? (
+            await this.prisma.course.findUnique({
+              where: { id: order.courseId },
+              select: { title: true },
+            })
+          )?.title
+        : order.bookId
+          ? (
+              await this.prisma.book.findUnique({
+                where: { id: order.bookId },
+                select: { title: true },
+              })
+            )?.title
+          : undefined;
+      await this.payouts.recordSale({
+        tenantId: order.tenantId,
+        orderId: order.id,
+        productKind: String(order.kind),
+        productId: order.courseId || order.bookId || order.bundleId || null,
+        productName: productName ?? null,
+        grossAmount: order.amount,
+        currency: order.currency,
+      });
+    }
+
+    return paid;
   }
 
   // One-time book ownership = lifetime entitlement (expiresAt stays null).
@@ -471,6 +505,14 @@ export class OrdersService {
       this.prisma.order.count({ where }),
     ]);
     return { rows, total, page, pageSize };
+  }
+
+  async getForUser(user: { userId: string; role: string }, id: string) {
+    const order = await this.get(id);
+    if (user.role !== "ADMIN" && order.userId !== user.userId) {
+      throw new ForbiddenException("This order belongs to someone else");
+    }
+    return order;
   }
 
   async get(id: string) {

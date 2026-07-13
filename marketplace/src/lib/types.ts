@@ -63,6 +63,69 @@ export type TenantCatalog = {
   packages: CatalogPackage[];
 };
 
+// ---- Global marketplace (Phase C): all consultants + all content together ----
+
+export type ExpertMini = {
+  tenantId: string;
+  slug: string | null;
+  name: string;
+  logoUrl: string | null;
+  primaryColor: string | null;
+};
+
+export type GlobalCourse = {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  coverUrl: string | null;
+  price: number;
+  currency: string;
+  tags: string[];
+  tenantId: string | null;
+  kind: "COURSE";
+  expert: ExpertMini | null;
+};
+
+export type GlobalBook = {
+  id: string;
+  title: string;
+  slug: string;
+  author: string;
+  description: string | null;
+  coverUrl: string | null;
+  price: number;
+  currency: string;
+  language: string;
+  categoryId: string | null;
+  tenantId: string | null;
+  kind: "BOOK";
+  expert: ExpertMini | null;
+};
+
+export type GlobalPackage = {
+  id: string;
+  name: string;
+  description: string | null;
+  type: string;
+  channel: string;
+  price: number;
+  currency: string;
+  billingDays: number | null;
+  isGlobal: boolean;
+  tenantId: string | null;
+  kind: "PACKAGE";
+  expert: ExpertMini | null;
+  consultants: { id: string; name: string; avatarUrl: string | null }[];
+};
+
+export type MarketplaceCatalog = {
+  experts: (ExpertCard & { hasDedicatedPortal?: boolean })[];
+  courses: GlobalCourse[];
+  books: GlobalBook[];
+  packages: GlobalPackage[];
+};
+
 export type SlugCheck = {
   slug: string;
   available: boolean;

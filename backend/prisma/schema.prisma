@@ -15,8 +15,21 @@ enum Role {
   // Admin-portal staff (support agents). Same portal as ADMIN but limited by
   // the per-user `scopes` list (e.g. may not delete).
   SUPPORT
+  // Tenant-scoped admin for a dedicated portal. Can manage ONLY their own
+  // tenant's content (books/courses/packages) via the short dedicated admin
+  // panel. Never sees other tenants or the global platform admin.
+  TENANT_ADMIN
   CONSULTANT
   CLIENT
+}
+
+// Status of a per-sale payout owed to a tenant/consultant (owner) after the
+// platform fee is deducted.
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PAID
+  VOID
 }
 
 enum PackageType {
@@ -203,6 +216,9 @@ model User {
   // (Package.isGlobal = true) are available to every consultant and are not
   // listed here.
   packages                Package[]      @relation("PackageConsultants")
+
+  // Per-sale payouts this user earns as a tenant owner/consultant (Phase 5).
+  ownedPayouts            Payout[]         @relation("OwnedPayouts")
 
   // Support tickets (in-app help chat)
   supportTickets          SupportTicket[]
@@ -531,12 +547,24 @@ model OtpCode {
 model ActivityLog {
   id        String   @id @default(cuid())
   userId    String?
+  tenantId  String?
   action    String
+  entity    String?
+  entityId  String?
   meta      String?
+  before    Json?
+  after     Json?
   ip        String?
+  userAgent String?
+  requestId String?
   createdAt DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([action])
+  @@index([entity, entityId])
+  @@index([createdAt])
 }
 
 model PlatformSetting {
@@ -1654,11 +1682,58 @@ model Tenant {
   // Per-tenant feature/module switches, e.g. { "community": true }
   moduleFlags Json?
 
+  // Platform commission on this tenant's sales, in percent. Set at onboarding
+  // approval; defaults to the platform minimum (15%). The tenant/consultant
+  // (owner) receives the remainder as their payout.
+  platformFeePercent Float @default(15)
+
+  // True once this tenant has been provisioned a dedicated portal (its own
+  // subdomain/custom-domain frontend). Dedicated tenants still ALSO appear in
+  // the global marketplace (dual presence).
+  hasDedicatedPortal Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  payouts Payout[]
+
   @@index([customDomain])
   @@index([category])
+}
+
+// One earnings record per completed sale. Splits a sale's gross amount into the
+// platform fee and the owner's (tenant/consultant) net payout. This powers the
+// per-consultant revenue breakdown in the main admin (Phase 5).
+model Payout {
+  id           String       @id @default(cuid())
+  tenantId     String
+  // The user who earns this payout — the tenant's main consultant/owner.
+  ownerUserId  String?
+  // Source transaction (exactly one of these is typically set).
+  paymentId    String?
+  orderId      String?
+  purchaseId   String?
+  // What was sold, for reporting (e.g. COURSE, PACKAGE, BOOK).
+  productKind  String
+  productId    String?
+  productName  String?
+  // Money split.
+  grossAmount  Float
+  feePercent   Float
+  platformFee  Float
+  netAmount    Float
+  currency     String       @default("PKR")
+  status       PayoutStatus @default(PENDING)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  owner  User?  @relation("OwnedPayouts", fields: [ownerUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ---- Sales attribution + referral commissions (Phase 2 growth engine) ----
@@ -1783,5 +1858,18 @@ model MonthlyClose {
   closedBy        String?
   closedAt        DateTime @default(now())
   @@unique([tenantId, period])
+  @@index([tenantId])
+}
+
+
+model UserTenantRole {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      Role
+  createdAt DateTime @default(now())
+
+  @@unique([userId, tenantId, role])
+  @@index([userId])
   @@index([tenantId])
 }

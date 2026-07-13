@@ -24,6 +24,7 @@ export class UpdateCategoryDto {
 }
 
 export class CreateBookDto {
+  @IsOptional() @IsString() tenantId?: string;
   @IsString() title: string;
   @IsOptional() @IsString() slug?: string;
   @IsOptional() @IsString() author?: string;

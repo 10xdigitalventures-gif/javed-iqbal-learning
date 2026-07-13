@@ -13,6 +13,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { PaymentProvidersService } from "./payment-providers.service";
 import { GhlSyncService } from "../ghl-sync/ghl-sync.service";
 import { AttributionService } from "../attribution/attribution.service";
+import { PayoutsService } from "../payouts/payouts.service";
 import {
   CheckoutContext,
   CheckoutResult,
@@ -28,6 +29,7 @@ export class PaymentsService {
     private providers: PaymentProvidersService,
     private ghl: GhlSyncService,
     private attribution: AttributionService,
+    private payouts: PayoutsService,
   ) {}
 
   // Gateways the client may choose from at checkout.
@@ -38,11 +40,13 @@ export class PaymentsService {
   // Record the client's chosen gateway on the payment and hand back a URL the
   // browser can open. The actual provider redirect/HTML is built lazily in
   // buildRedirect so the gateway API is only called when the user proceeds.
-  async checkout(paymentId: string, gateway?: string) {
+  async checkout(userId: string, paymentId: string, gateway?: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
     });
     if (!payment) throw new NotFoundException("Payment not found");
+    if (payment.userId !== userId)
+      throw new ForbiddenException("This payment belongs to someone else");
 
     const provider = this.providers.get(gateway);
     await this.prisma.payment.update({
@@ -175,6 +179,9 @@ export class PaymentsService {
     } catch {
       // attribution must never block payment confirmation
     }
+    // Revenue split — record the owner's payout + platform fee (Phase 5).
+    // Best-effort: never block payment confirmation.
+    await this.payouts.recordForPayment(payment.id);
     return updated;
   }
 

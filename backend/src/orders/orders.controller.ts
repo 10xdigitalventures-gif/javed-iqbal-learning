@@ -62,7 +62,7 @@ export class OrdersController {
   }
 
   @Get(":id")
-  get(@Param("id") id: string) {
-    return this.service.get(id);
+  get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.getForUser(user, id);
   }
 }

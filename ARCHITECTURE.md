@@ -26,10 +26,11 @@
 ```
 
 ### Why this stack
+
 - **NestJS + Prisma + PostgreSQL** - typed, modular, well-suited to RBAC, usage metering and relational data (purchases, allowances, meetings).
 - **Next.js (App Router)** - one codebase for the three web portals (Admin / Consultant / Client) with role-based routing.
 - **Expo (React Native)** - single codebase builds both Android (APK) and iOS apps for **Consultant + Client**, distributed directly without app stores.
-- **Provider pattern** - PayFast and email are env-driven with safe mock fallbacks so the system runs end-to-end before live credentials exist.
+- **Provider pattern** - GoPayFast / PayFast PK and email are env-driven with safe mock fallbacks so the system runs end-to-end before live credentials exist.
 
 ## 2. Communication security model
 
@@ -49,16 +50,18 @@ Each purchase snapshots the package limits at purchase time. A central **UsageSe
 > Cost ranges are indicative for a single small delivery team and will vary by region, rate and scope changes.
 
 ### Phase 1 - MVP (core, ~4-6 weeks)
+
 - Auth (JWT + OTP), roles, admin account management.
 - Packages (one-time + mentorship) with configurable limits.
 - Text messaging with usage tracking + history.
-- One-time + subscription purchase via PayFast (+ mock fallback), invoices.
+- One-time + subscription purchase via GoPayFast / PayFast PK (+ mock fallback), invoices.
 - Meeting booking + approval, consultant availability.
 - In-app + email notifications.
 - Web portal (Admin/Consultant/Client) + basic mobile (Consultant/Client).
 - **Indicative range: $6k-$12k.**
 
 ### Phase 2 - Rich media & communities (~3-4 weeks)
+
 - Audio + video messaging with duration limits and recording/upload/playback.
 - Communities (free/paid, posts, comments).
 - Calendar reminders, reschedule flows, richer reporting/analytics.
@@ -66,6 +69,7 @@ Each purchase snapshots the package limits at purchase time. A central **UsageSe
 - **Indicative range: $4k-$9k.**
 
 ### Phase 3 - Scale & polish (~3-5 weeks)
+
 - Live audio/video calling (WebRTC), push notifications.
 - Cloud media storage with signed URLs, full audit dashboards.
 - Advanced analytics, multi-currency, white-labeling.
@@ -73,16 +77,33 @@ Each purchase snapshots the package limits at purchase time. A central **UsageSe
 - **Indicative range: $5k-$12k.**
 
 ### Cross-phase (ongoing)
+
 - Hosting/infra (DB, app servers, storage, email/PayFast fees).
 - Maintenance & support retainer.
 
 ## 5. Deliverables checklist
+
 - [x] UI/UX (web portals + mobile app)
 - [x] Web portal + admin panel
 - [x] Consultant + Client mobile app (Expo)
 - [x] Backend API + database schema + seed
-- [x] PayFast payment integration (+ mock)
+- [x] GoPayFast / PayFast PK payment integration (+ mock)
 - [x] Technical docs (this file + README)
 - [x] User manual (USER_MANUAL.md)
 - [x] Docker deployment config
 - [ ] Production hosting + live credentials (client-provided)
+
+## 6. Marketplace + multi-tenant architecture update
+
+The current direction is a shared-backend, shared-database, multi-tenant platform:
+
+1. **Global Marketplace** (`marketplace/`) — public directory and global catalog across all listed tenants. This is the only place for self-serve onboarding.
+2. **Dedicated Tenant Portal** (`web/`, resolved by subdomain/custom domain) — branded tenant frontend scoped to one tenant. It must not include onboarding.
+3. **Main Admin** — platform owner/global admin for tenants, feature flags, revenue, audit logs, and settings.
+4. **Tenant Admin** (`/tenant-admin`) — short per-tenant admin for tenant-owned content and revenue only.
+
+Tenant resolution order remains: explicit tenant header, custom domain, subdomain, then default tenant. Dedicated portal tenants also remain eligible for marketplace listing when `listed=true`.
+
+### Enterprise audit target
+
+The current activity/audit system should be upgraded to capture every admin and tenant-admin mutation with actor, role, tenant, target entity, action, timestamp, IP/user-agent, and before/after JSON. Logs should be append-only, filterable, exportable, and tenant-scoped for tenant admins.

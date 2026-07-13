@@ -6,13 +6,21 @@ import { Injectable, Logger } from "@nestjs/common";
 export class MailService {
   private readonly logger = new Logger("MailService");
 
+  private maskEmail(value: string) {
+    const [local = "", domain = ""] = (value || "").split("@");
+    const shown = local.length <= 2 ? local.slice(0, 1) : local.slice(0, 2);
+    return `${shown}***@${domain || "redacted"}`;
+  }
+
   get enabled() {
     return Boolean(process.env.SENDGRID_API_KEY || process.env.SMTP_HOST);
   }
 
   async send(to: string, subject: string, body: string): Promise<void> {
     if (!this.enabled) {
-      this.logger.log(`[mock-email] to=${to} subject="${subject}" :: ${body}`);
+      this.logger.log(
+        `[mock-email] queued subject="${subject}" recipient=${this.maskEmail(to)} bodyLength=${body.length}`,
+      );
       return;
     }
 
@@ -21,7 +29,9 @@ export class MailService {
         await this.sendViaSendgrid(to, subject, body);
       } else {
         // SMTP path intentionally minimal; integrate nodemailer in production.
-        this.logger.log(`[smtp] to=${to} subject="${subject}"`);
+        this.logger.log(
+          `[smtp] queued subject="${subject}" recipient=${this.maskEmail(to)}`,
+        );
       }
     } catch (e) {
       this.logger.error(`Email send failed: ${(e as Error).message}`);

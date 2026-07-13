@@ -18,6 +18,7 @@ import {
 } from "@prisma/client";
 
 export class CreateCourseDto {
+  @IsOptional() @IsString() tenantId?: string;
   @IsString() title: string;
   @IsOptional() @IsString() slug?: string;
   @IsOptional() @IsString() description?: string;

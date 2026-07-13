@@ -16,6 +16,7 @@ import {
   RegisterDto,
   ResetPasswordDto,
 } from "./dto";
+import { randomBytes } from "crypto";
 
 @Injectable()
 export class AuthService {
@@ -122,17 +123,32 @@ export class AuthService {
     email: string;
     name: string;
     role: Role;
+    tenantId?: string | null;
+    scopes?: string[];
     phone?: string | null;
     avatarUrl?: string | null;
+    tenantRoles?: Array<{ tenantId: string; role: Role }>;
   }) {
     return {
       id: u.id,
       email: u.email,
       name: u.name,
       role: u.role,
+      tenantId: u.tenantId ?? null,
+      scopes: u.scopes ?? [],
       phone: u.phone ?? null,
       avatarUrl: u.avatarUrl ?? null,
+      tenantRoles: u.tenantRoles ?? [],
     };
+  }
+
+  private async withTenantRoles(user: any) {
+    const tenantRoles = await (this.prisma as any).userTenantRole.findMany({
+      where: { userId: user.id },
+      select: { tenantId: true, role: true },
+      orderBy: { createdAt: "asc" },
+    });
+    return { ...user, tenantRoles };
   }
 
   async register(
@@ -166,7 +182,10 @@ export class AuthService {
       await this.attribution.attachSignupReferral(user.id, dto.ref);
     }
     const did = await this.registerDevice(user.id, device);
-    return { token: this.sign(user, did), user: this.publicUser(user) };
+    return {
+      token: this.sign(user, did),
+      user: this.publicUser(await this.withTenantRoles(user)),
+    };
   }
 
   async login(
@@ -183,7 +202,10 @@ export class AuthService {
     if (!ok) throw new UnauthorizedException("Invalid credentials");
     await this.logActivity(user.id, "LOGIN");
     const did = await this.registerDevice(user.id, device);
-    return { token: this.sign(user, did), user: this.publicUser(user) };
+    return {
+      token: this.sign(user, did),
+      user: this.publicUser(await this.withTenantRoles(user)),
+    };
   }
 
   // --- OTP (login / verification) ---
@@ -219,7 +241,10 @@ export class AuthService {
     void otp;
     await this.logActivity(user.id, "LOGIN_OTP");
     const did = await this.registerDevice(user.id, device);
-    return { token: this.sign(user, did), user: this.publicUser(user) };
+    return {
+      token: this.sign(user, did),
+      user: this.publicUser(await this.withTenantRoles(user)),
+    };
   }
 
   // --- Password reset ---
@@ -250,10 +275,45 @@ export class AuthService {
     return { changed: true };
   }
 
+  async deleteAccount(userId: string, currentPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException("User not found");
+    const ok = await bcrypt.compare(currentPassword, user.password);
+    if (!ok) throw new UnauthorizedException("Invalid credentials");
+
+    const anonymizedEmail = `deleted+${user.id}.${Date.now()}@redacted.local`;
+    const replacementPassword = await bcrypt.hash(
+      randomBytes(32).toString("hex"),
+      10,
+    );
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: anonymizedEmail,
+        password: replacementPassword,
+        name: "Deleted User",
+        phone: null,
+        avatarUrl: null,
+        bio: null,
+        expertise: null,
+        title: null,
+        pushToken: null,
+        isActive: false,
+      },
+    });
+    await this.prisma.userDevice.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    await this.logActivity(userId, "ACCOUNT_DELETED");
+    return { ok: true };
+  }
+
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
-    return this.publicUser(user);
+    return this.publicUser(await this.withTenantRoles(user));
   }
 
   private async consumeOtp(email: string, code: string, purpose: OtpPurpose) {

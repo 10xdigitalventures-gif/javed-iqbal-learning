@@ -212,6 +212,7 @@ function ChapterManager({ bookId }: { bookId: string }) {
         `${API_URL}/books/${bookId}/import-pdf?replace=${replace}&ocr=${ocr}`,
         {
           method: "POST",
+          credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: form,
         },
@@ -254,6 +255,7 @@ function ChapterManager({ bookId }: { bookId: string }) {
       let job: any;
       try {
         const res = await fetch(`${API_URL}/books/import-jobs/${jobId}`, {
+          credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) continue; // transient error - keep polling

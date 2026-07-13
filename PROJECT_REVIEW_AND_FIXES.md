@@ -140,3 +140,137 @@ The sandbox has no network access, so dependency-resolving builds
 were syntax-checked with Prettier and reviewed for self-consistency (matching
 API shapes between backend and web, e.g. `{ url }` from checkout and
 `{ providers }` from the gateway list).
+
+## Phase F/G audit — dedicated portals and tenant admin
+
+Latest work started from the ZIP attached to the locked spec:
+
+- Added `TENANT_ADMIN` to frontend role types and post-login routing.
+- Added `/tenant-admin` short admin area with dashboard, packages, courses, e-books, and revenue pages.
+- Added tenant-admin backend controller with tenant-scoped package/course/book routes.
+- Added tenant-scoped revenue via existing `/payouts/me`.
+- Added role-switcher UI between tenant admin and consultant views.
+- Confirmed onboarding text/form remains in `marketplace/` and is not present as a dedicated portal route in `web/`.
+
+Remaining Phase F/G work:
+
+1. Finish dedicated tenant storefront pages and smoke-test that no onboarding CTA/form appears on tenant domains.
+2. Finalize tenant admin UI copy and remove any global-admin-only wording/actions copied from main admin pages.
+3. Add tenant-scoped chapter/media/course-module management or explicitly disable those controls.
+4. Implement true multi-role role switching if one login must be both consultant and tenant admin; current schema still has one `User.role`.
+5. Run `npm install`, Prisma generate/migrate, backend build, web build, marketplace build, and E2E tests in a connected environment.
+
+A full enterprise comparison and remaining scope checklist is now in `ENTERPRISE_COMPARISON_AND_REMAINING_SCOPE.md`.
+
+## White-label self-service pass
+
+Implemented a first self-service white-label branding pass for onboarded tenants:
+
+- Added `/tenant-admin/branding` page.
+- Added tenant admin sidebar link: Branding.
+- Added tenant-scoped branding endpoints under `/tenant-admin/branding`.
+- Tenant admins can set brand name, tagline, support email, logo URLs, favicon URL, primary/secondary/accent colors, font family, and custom domain.
+- The page includes a live preview and uses the existing runtime branding provider, so saved colors and logo values apply tenant-wide after reload.
+
+Remaining: upload-based logo/favicon selection, mobile app build generator, EAS profile export, DNS/SSL verification UI, white-label email/report templates, and audit logging for before/after branding changes.
+
+## Full backend audit logs pass
+
+Branding-specific logging is not enough, so a platform-wide backend audit layer has been started:
+
+- Added enterprise audit fields to `ActivityLog`: `tenantId`, `entity`, `entityId`, `before`, `after`, `userAgent`, and `requestId`.
+- Added migration `20260712030000_full_audit_logs`.
+- Added `ActivityService.logFull()` for structured audit entries.
+- Added global `AuditInterceptor` for all backend POST/PUT/PATCH/DELETE requests. It records actor, tenant, endpoint/action, params/query/body (with sensitive fields redacted), result snapshot, IP, user-agent, request id, status, and duration.
+- Expanded admin audit filters/export for tenant/entity fields.
+- Updated Admin Audit UI to show tenant, entity, device/user-agent, request id, and before/after details.
+
+Retention target: keep at least one month of full logs online for review. Longer retention can be archived later.
+
+## Completion pass — tenant admin scope + audit retention
+
+Additional remaining gaps addressed:
+
+- Fixed marketplace README wording so the marketplace home is documented as using `GET /marketplace/catalog`.
+- Added tenant-scoped course detail/module/lesson routes under `/tenant-admin/courses/*` with ownership checks before every mutation.
+- Added tenant-scoped book detail/content/chapter routes under `/tenant-admin/books/*` with ownership checks before every mutation.
+- Added explicit before/after audit logging for tenant branding updates.
+- Added `AuditRetentionService` to enforce the one-month online audit log retention target (`AUDIT_LOG_RETENTION_DAYS`, minimum 30 days; sweep interval `AUDIT_RETENTION_SWEEP_HOURS`).
+
+Static syntax/transpile checks passed for the newly edited backend and frontend files. Full runtime validation still requires installing dependencies and generating Prisma client in the connected environment.
+
+## Multi-role foundation pass
+
+Started the true multi-role account model needed for consultant + tenant-admin switching:
+
+- Added `UserTenantRole` Prisma model.
+- Added migration `20260712094000_user_tenant_roles`.
+- The model allows one user to hold multiple tenant-scoped roles, e.g. `TENANT_ADMIN` and `CONSULTANT`, for the same tenant.
+
+Next wiring step: expose admin APIs to assign/remove `UserTenantRole` entries and update auth/session mode switching so the frontend role switcher uses selected mode instead of only `User.role`.
+
+## Multi-role API wiring pass
+
+Continued the multi-role work:
+
+- Added `TenantRoleDto`.
+- Added admin APIs to list, assign, and remove tenant-scoped roles for a user:
+  - `GET /users/:id/tenant-roles`
+  - `POST /users/:id/tenant-roles`
+  - `POST /users/:id/tenant-roles/remove`
+- Added service methods for `UserTenantRole` upsert/delete.
+- Expanded public user select to include `tenantId` and `scopes` for admin/team UI use.
+
+Next: wire frontend admin UI for assigning roles and update login/session role switching to consume these tenant roles.
+
+## Role switcher frontend wiring pass
+
+Continued the multi-role flow:
+
+- Added frontend active-role state in `web/src/lib/auth.tsx` using `localStorage.activeRole`.
+- Added `switchRole(role)` to auth context.
+- Updated the sidebar role switcher to call `switchRole()` instead of only linking between pages.
+- The selected role rewrites the in-memory user role and routes to the correct home for that role.
+
+Note: this is the frontend/session wiring layer. Final security still depends on backend guards and the assigned `UserTenantRole` records added in the prior pass. A stricter next step is to expose `/auth/me` tenant-role memberships and validate the selected active role against those memberships before switching.
+
+## Auth membership validation pass
+
+Continued and tightened role switching:
+
+- `/auth/me`, login, register, and OTP login now include `tenantRoles` in the returned user object.
+- Frontend `User` type now includes `tenantId` and `tenantRoles`.
+- Frontend role switching now validates the selected role against either the user's base role or assigned `tenantRoles` before switching.
+- Stale/invalid `localStorage.activeRole` is cleared automatically during auth refresh.
+
+Next remaining pieces: admin UI for assigning tenant roles visually, mobile app build generator, logo/favicon upload picker, DNS/SSL verification UI, and white-label email/report templates.
+
+## Admin tenant-role UI pass
+
+Continued the multi-role flow into the admin UI:
+
+- Admin Team page now loads tenants and each staff user's tenant-scoped roles.
+- Admin can assign a tenant role from the UI (`TENANT_ADMIN` or `CONSULTANT`) for a selected tenant.
+- Admin can remove a tenant role by clicking the role chip.
+- Base role selector now includes `TENANT_ADMIN` and `CONSULTANT` in addition to `ADMIN` and `SUPPORT`.
+- Team page subtitle updated to cover tenant-scoped role management.
+
+Static transpile checks passed for the changed frontend/backend role files. Runtime validation still requires install/build in the connected environment.
+
+## White-label completion pass
+
+Addressed the remaining white-label operational gaps:
+
+- Added tenant-admin domain verification endpoint: `GET /tenant-admin/branding/verify-domain`.
+- Added DNS verification UI on `/tenant-admin/branding` with CNAME instructions.
+- Added `/tenant-admin/mobile-app` page to generate per-tenant EAS/mobile app identity values:
+  - app name
+  - app slug
+  - iOS bundle identifier
+  - Android package name
+  - tenant slug
+  - brand color
+  - icon/splash URLs
+- Added Mobile App navigation item in tenant admin sidebar.
+
+Still requires actual EAS build execution in the deployment environment, but the tenant-facing configuration/export workflow is now present.

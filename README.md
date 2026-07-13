@@ -1,6 +1,6 @@
 # Consult Hub - Consultant & Mentorship Platform
 
-A secure platform connecting **Consultants** and **Clients** for one-time consultations and recurring mentorship programs, with text/audio/video messaging, meeting scheduling, communities, and PayFast payments.
+A secure platform connecting **Consultants** and **Clients** for one-time consultations and recurring mentorship programs, with text/audio/video messaging, meeting scheduling, communities, and GoPayFast / PayFast PK payments.
 
 ## Monorepo structure
 
@@ -23,13 +23,14 @@ consultant-platform/
 - **Messaging**: real-time-ish (5s polling) text + recorded audio/video, with duration limits and per-package usage tracking.
 - **Meetings**: consultant weekly availability, client booking, approval/reschedule, reminders, session history.
 - **Communities**: free or paid groups with posts + comments (membership-gated).
-- **Payments**: PayFast (Pakistan) for one-time + subscriptions, invoices, history. Falls back to a mock checkout when PayFast keys are absent (great for local dev).
-- **Notifications**: in-app + email (email via SMTP, mock-logged when unset).
+- **Payments**: GoPayFast / PayFast PK for one-time + subscriptions, invoices, history. Falls back to a mock checkout when PayFast keys are absent (great for local dev).
+- **Notifications**: in-app + email (email via SendGrid when configured, otherwise mock-logged in development).
 - **Auth/Security**: JWT, bcrypt password hashing, OTP (register/login/reset), role-based access control, activity logging.
 
 ## Quick start (local)
 
 ### 1. Backend
+
 ```bash
 cd backend
 cp .env.example .env          # edit DATABASE_URL + JWT_SECRET
@@ -40,6 +41,7 @@ npm run start:dev             # http://localhost:4000/api
 ```
 
 ### 2. Web
+
 ```bash
 cd web
 cp .env.example .env.local    # NEXT_PUBLIC_API_URL=http://localhost:4000/api
@@ -48,27 +50,30 @@ npm run dev                   # http://localhost:3000
 ```
 
 ### 3. Mobile
+
 ```bash
 cd mobile
 npm install
 npm run start                 # Expo - press a (Android) / i (iOS)
 ```
+
 > On Android emulator the API base is `http://10.0.2.2:4000/api` (see `app.json` > extra.apiUrl). For a physical device, set it to your machine's LAN IP.
 
 ## Demo accounts (after seed)
 
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@example.com | Password123! |
-| Consultant | consultant@example.com | Password123! |
+| Role       | Email                   | Password     |
+| ---------- | ----------------------- | ------------ |
+| Admin      | admin@example.com       | Password123! |
+| Consultant | consultant@example.com  | Password123! |
 | Consultant | consultant2@example.com | Password123! |
-| Client | client@example.com | Password123! |
+| Client     | client@example.com      | Password123! |
 
 ## Docker
 
 ```bash
 docker compose up --build
 ```
+
 Starts Postgres, the backend (port 4000) and the web portal (port 3000).
 
 ## Mobile distribution (no app store)
@@ -77,3 +82,21 @@ Starts Postgres, the backend (port 4000) and the web portal (port 3000).
 - **iOS**: `eas build -p ios --profile preview` with an ad-hoc / enterprise profile for direct (non-App-Store) distribution.
 
 See `ARCHITECTURE.md` for the full architecture, security model, and the phased delivery plan with cost ranges.
+
+## Marketplace, dedicated portals, and tenant admin status
+
+The platform now includes additional apps beyond the original MVP:
+
+- `marketplace/` — central 10X marketplace where visitors browse all listed tenants/experts and where new experts/tenants self-onboard.
+- `web/` — per-tenant branded portal plus Admin, Consultant, Client, and Tenant Admin areas.
+- `mobile-marketplace/` — mobile marketplace shell.
+
+Current multi-tenant model:
+
+- One backend and one database, with tenant-owned records scoped by `tenantId`.
+- Main marketplace onboarding is central. Dedicated tenant portals must not show direct onboarding.
+- Dedicated tenants can still appear in the global marketplace (dual presence).
+- Main Admin manages all tenants, feature flags, platform fee %, dedicated portal flag, and global revenue.
+- Tenant Admin is a short scoped admin panel for only that tenant’s packages/courses/books/revenue.
+
+See `ENTERPRISE_COMPARISON_AND_REMAINING_SCOPE.md` for the current remaining-work audit and enterprise benchmark comparison.

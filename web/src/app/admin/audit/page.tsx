@@ -24,6 +24,13 @@ type LogRow = {
   action: string;
   meta: string | null;
   ip: string | null;
+  tenantId?: string | null;
+  entity?: string | null;
+  entityId?: string | null;
+  userAgent?: string | null;
+  requestId?: string | null;
+  before?: any;
+  after?: any;
   createdAt: string;
   userId: string | null;
   user?: { id: string; name: string; email: string; role: string } | null;
@@ -51,6 +58,8 @@ export default function AdminAudit() {
   const [q, setQ] = useState("");
   const debouncedQ = useDebounced(q);
   const [action, setAction] = useState("");
+  const [tenantId, setTenantId] = useState("");
+  const [entity, setEntity] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
@@ -60,6 +69,8 @@ export default function AdminAudit() {
     return buildQuery({
       q: debouncedQ,
       action,
+      tenantId,
+      entity,
       from,
       to,
       page,
@@ -85,15 +96,16 @@ export default function AdminAudit() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQ, action, from, to, page]);
+  }, [debouncedQ, action, tenantId, entity, from, to, page]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQ, action, from, to]);
+  }, [debouncedQ, action, tenantId, entity, from, to]);
 
   async function downloadCsv() {
     const token = getToken();
     const res = await fetch(`${API_URL}/activity/admin/export${query()}`, {
+      credentials: "include",
       headers: token ? { Authorization: "Bearer " + token } : {},
     });
     const blob = await res.blob();
@@ -111,7 +123,7 @@ export default function AdminAudit() {
     <div>
       <PageHeader
         title="Audit log"
-        subtitle="Global activity tracking across every user on the platform."
+        subtitle="Full backend logs: who did what, where, when, from which tenant/device, with request details."
         action={
           <Button variant="outline" onClick={downloadCsv}>
             Export CSV
@@ -121,7 +133,7 @@ export default function AdminAudit() {
       <ErrorText message={error} />
 
       <Card className="mb-4">
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-6">
           <Input
             label="Search action"
             placeholder="e.g. login, purchase"
@@ -140,6 +152,18 @@ export default function AdminAudit() {
               </option>
             ))}
           </Select>
+          <Input
+            label="Tenant ID"
+            placeholder="tenant_..."
+            value={tenantId}
+            onChange={(e) => setTenantId(e.target.value)}
+          />
+          <Input
+            label="Entity"
+            placeholder="tenant-admin/branding"
+            value={entity}
+            onChange={(e) => setEntity(e.target.value)}
+          />
           <Input
             label="From"
             type="date"
@@ -165,9 +189,11 @@ export default function AdminAudit() {
                 <tr className="border-b text-left text-slate-500">
                   <th className="px-3 py-2 font-medium">Time</th>
                   <th className="px-3 py-2 font-medium">User</th>
+                  <th className="px-3 py-2 font-medium">Tenant</th>
                   <th className="px-3 py-2 font-medium">Action</th>
+                  <th className="px-3 py-2 font-medium">Entity</th>
                   <th className="px-3 py-2 font-medium">Details</th>
-                  <th className="px-3 py-2 font-medium">IP</th>
+                  <th className="px-3 py-2 font-medium">IP / Device</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,21 +214,44 @@ export default function AdminAudit() {
                         <span className="text-slate-400">System</span>
                       )}
                     </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">
+                      {l.tenantId || "—"}
+                    </td>
                     <td className="px-3 py-2 font-medium text-slate-800">
                       {l.action}
                     </td>
-                    <td className="px-3 py-2 text-slate-500">
-                      {formatMeta(l.meta)}
+                    <td className="px-3 py-2 text-xs text-slate-500">
+                      {l.entity || "—"}
+                      {l.entityId ? ` / ${l.entityId}` : ""}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-slate-400">
-                      {l.ip || "\u2014"}
+                    <td className="max-w-xl px-3 py-2 text-slate-500">
+                      <div>{formatMeta(l.meta)}</div>
+                      {l.before || l.after ? (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-xs text-brand">
+                            before/after
+                          </summary>
+                          <pre className="mt-1 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[11px]">
+                            {JSON.stringify(
+                              { before: l.before, after: l.after },
+                              null,
+                              2,
+                            )}
+                          </pre>
+                        </details>
+                      ) : null}
+                    </td>
+                    <td className="max-w-xs px-3 py-2 text-xs text-slate-400">
+                      <div>{l.ip || "—"}</div>
+                      <div className="truncate">{l.userAgent || ""}</div>
+                      {l.requestId ? <div>req: {l.requestId}</div> : null}
                     </td>
                   </tr>
                 ))}
                 {rows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={7}
                       className="px-3 py-6 text-center text-slate-400"
                     >
                       No activity found for these filters.

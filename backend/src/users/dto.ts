@@ -87,3 +87,11 @@ export class UpdateUserDto {
   @IsString({ each: true })
   tags?: string[];
 }
+
+export class TenantRoleDto {
+  @IsString()
+  tenantId: string;
+
+  @IsEnum(Role)
+  role: Role;
+}

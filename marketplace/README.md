@@ -6,9 +6,7 @@ the per-tenant web app, but talks to the **same** NestJS backend.
 
 ## Pages
 
-- `/` — public expert directory. Fetches `GET /tenant/directory` (active +
-  listed tenants) and links each card to its platform subdomain
-  (`{slug}.{NEXT_PUBLIC_ROOT_DOMAIN}`).
+- `/` — public global marketplace. Fetches `GET /marketplace/catalog` and renders listed tenants plus global courses, books, and packages. Expert cards link to `/expert/{slug}` and then onward to the tenant storefront/subdomain.
 - `/onboard` — self-serve onboarding form. Checks availability via
   `GET /tenant/slug-available` and creates the tenant via `POST /tenant/onboard`.
   New tenants are provisioned on their subdomain immediately but stay UNLISTED
@@ -41,3 +39,9 @@ NEXT_PUBLIC_ROOT_DOMAIN=10xdigitalventures.com
 npm install
 npm run dev   # http://localhost:3001
 ```
+
+## Current catalog behavior
+
+The marketplace home now uses `GET /marketplace/catalog`, which returns all listed tenants plus global courses, books, and packages. Individual endpoints also exist for `/marketplace/experts`, `/marketplace/courses`, `/marketplace/books`, and `/marketplace/packages`.
+
+Onboarding remains marketplace-only: `/onboard` calls `POST /tenant/onboard`; new tenants are created unlisted and require admin approval/configuration before public listing/dedicated portal rollout.

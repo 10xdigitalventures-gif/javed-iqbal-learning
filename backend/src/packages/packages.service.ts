@@ -40,8 +40,9 @@ export class PackagesService {
   }
 
   // Admin — all packages.
-  listAll() {
+  listAll(tenantId?: string) {
     return this.prisma.package.findMany({
+      where: tenantId ? { tenantId } : {},
       orderBy: { createdAt: "desc" },
       include: INCLUDE_CONSULTANTS,
     });
@@ -61,6 +62,7 @@ export class PackagesService {
     const limits = this.channelLimits(channel, dto);
     return this.prisma.package.create({
       data: {
+        tenantId: (dto as any).tenantId,
         name: dto.name,
         description: dto.description,
         type: dto.type,

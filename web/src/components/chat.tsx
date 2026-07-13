@@ -107,7 +107,7 @@ export function ChatPanel({
       }
     };
     if (url && typeof window !== "undefined" && "EventSource" in window) {
-      es = new EventSource(url);
+      es = new EventSource(url, { withCredentials: true });
       es.addEventListener("message", refreshIfMine);
       es.addEventListener("message:update", refreshIfMine);
       es.addEventListener("message:reaction", refreshIfMine);

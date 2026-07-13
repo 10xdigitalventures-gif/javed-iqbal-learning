@@ -10,7 +10,12 @@ import {
 } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { UsersService } from "./users.service";
-import { CreateUserDto, PushTokenDto, UpdateUserDto } from "./dto";
+import {
+  CreateUserDto,
+  PushTokenDto,
+  UpdateUserDto,
+  TenantRoleDto,
+} from "./dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
@@ -92,6 +97,24 @@ export class UsersController {
   @Roles(Role.ADMIN)
   update(@Param("id") id: string, @Body() dto: UpdateUserDto) {
     return this.service.update(id, dto);
+  }
+
+  @Get(":id/tenant-roles")
+  @Roles(Role.ADMIN)
+  tenantRoles(@Param("id") id: string) {
+    return this.service.listTenantRoles(id);
+  }
+
+  @Post(":id/tenant-roles")
+  @Roles(Role.ADMIN)
+  assignTenantRole(@Param("id") id: string, @Body() dto: TenantRoleDto) {
+    return this.service.assignTenantRole(id, dto.tenantId, dto.role);
+  }
+
+  @Post(":id/tenant-roles/remove")
+  @Roles(Role.ADMIN)
+  removeTenantRole(@Param("id") id: string, @Body() dto: TenantRoleDto) {
+    return this.service.removeTenantRole(id, dto.tenantId, dto.role);
   }
 
   @Patch(":id/activate")

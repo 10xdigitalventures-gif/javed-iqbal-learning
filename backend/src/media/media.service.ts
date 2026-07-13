@@ -1,4 +1,3 @@
-
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { spawn, spawnSync } from "child_process";
@@ -68,6 +67,54 @@ export class MediaService {
     await this.getAsset(id);
     await this.prisma.mediaAsset.delete({ where: { id } });
     return { ok: true };
+  }
+
+  async canAccessKey(
+    userId: string,
+    role: string,
+    key: string,
+  ): Promise<boolean> {
+    if (!key) return false;
+    if (role === "ADMIN" || role === "SUPPORT") return true;
+
+    const ownedAsset = await this.prisma.mediaAsset.findFirst({
+      where: { key, ownerId: userId },
+      select: { id: true },
+    });
+    if (ownedAsset) return true;
+
+    const lesson = await this.prisma.lesson.findFirst({
+      where: { OR: [{ contentKey: key }, { thumbnailUrl: key }] },
+      select: {
+        isPreview: true,
+        course: {
+          select: {
+            enrollments: {
+              where: { userId, revokedAt: null },
+              select: { accessUntil: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    if (lesson) {
+      if (lesson.isPreview) return true;
+      const enrollment = lesson.course.enrollments[0];
+      if (!enrollment) return false;
+      return (
+        !enrollment.accessUntil ||
+        new Date(enrollment.accessUntil).getTime() > Date.now()
+      );
+    }
+
+    const proof = await this.prisma.payment.findFirst({
+      where: { proofKey: key, userId },
+      select: { id: true },
+    });
+    if (proof) return true;
+
+    return false;
   }
 
   // ---------------------------------------------------------------------------
@@ -197,9 +244,12 @@ export class MediaService {
       const res = spawnSync(
         "ffprobe",
         [
-          "-v", "error",
-          "-show_entries", "format=duration",
-          "-of", "default=noprint_wrappers=1:nokey=1",
+          "-v",
+          "error",
+          "-show_entries",
+          "format=duration",
+          "-of",
+          "default=noprint_wrappers=1:nokey=1",
           filePath,
         ],
         { timeout: 15000 },
@@ -220,19 +270,36 @@ export class MediaService {
     const outPath = join(dirname(inputPath), outName);
     return new Promise((resolve) => {
       const ff = spawn("ffmpeg", [
-        "-i", inputPath,
-        "-vf", "scale=trunc(oh*a/2)*2:min(ih\," + maxH + ")",
-        "-c:v", "libx264", "-crf", "23", "-preset", "fast",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        "-y", outPath,
+        "-i",
+        inputPath,
+        "-vf",
+        "scale=trunc(oh*a/2)*2:min(ih\," + maxH + ")",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "23",
+        "-preset",
+        "fast",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        "-y",
+        outPath,
       ]);
       ff.on("close", (code) => {
-        if (code !== 0) { resolve(null); return; }
+        if (code !== 0) {
+          resolve(null);
+          return;
+        }
         try {
           const size = statSync(outPath).size;
           resolve({ path: outPath, filename: outName, size });
-        } catch { resolve(null); }
+        } catch {
+          resolve(null);
+        }
       });
       ff.on("error", () => resolve(null));
     });
@@ -245,16 +312,28 @@ export class MediaService {
     const outPath = join(dirname(inputPath), outName);
     return new Promise((resolve) => {
       const ff = spawn("ffmpeg", [
-        "-i", inputPath,
-        "-c:a", "aac", "-b:a", "96k", "-ac", "1",
-        "-y", outPath,
+        "-i",
+        inputPath,
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        "-ac",
+        "1",
+        "-y",
+        outPath,
       ]);
       ff.on("close", (code) => {
-        if (code !== 0) { resolve(null); return; }
+        if (code !== 0) {
+          resolve(null);
+          return;
+        }
         try {
           const size = statSync(outPath).size;
           resolve({ path: outPath, filename: outName, size });
-        } catch { resolve(null); }
+        } catch {
+          resolve(null);
+        }
       });
       ff.on("error", () => resolve(null));
     });

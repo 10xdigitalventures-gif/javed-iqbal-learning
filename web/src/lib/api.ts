@@ -24,17 +24,15 @@ function toAbsoluteMediaUrl(url?: string | null): string {
 }
 
 export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
+  return null;
 }
 
-export function setToken(token: string) {
-  localStorage.setItem("token", token);
-}
+export function setToken(_token: string) {}
 
 export function clearToken() {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("token");
+  }
 }
 
 type Options = {
@@ -58,6 +56,7 @@ export async function api<T = any>(
   const res = await fetch(`${API_URL}${path}`, {
     method: opts.method || "GET",
     headers,
+    credentials: "include",
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
 
@@ -111,6 +110,7 @@ export async function uploadFile(file: File): Promise<UploadResult> {
   form.append("file", file);
   const res = await fetch(`${API_URL}/media/upload`, {
     method: "POST",
+    credentials: "include",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
   });
@@ -162,12 +162,8 @@ export async function resolveMediaUrl(
   }
 }
 
-// Build the Server-Sent Events URL (token in query string because EventSource
-// cannot send Authorization headers).
 export function eventsUrl(): string | null {
-  const token = getToken();
-  if (!token) return null;
-  return `${API_URL}/events?token=${encodeURIComponent(token)}`;
+  return `${API_URL}/events`;
 }
 
 export { API_URL };

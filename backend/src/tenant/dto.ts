@@ -1,9 +1,12 @@
 import {
   IsBoolean,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
 } from "class-validator";
 
 export class CreateTenantDto {
@@ -27,6 +30,13 @@ export class CreateTenantDto {
   @IsOptional() @IsString() @MaxLength(160) supportEmail?: string;
 
   @IsOptional() @IsObject() moduleFlags?: Record<string, boolean>;
+
+  // Platform commission % on this tenant's sales (default 15). Set at
+  // onboarding approval; the owner keeps the remainder.
+  @IsOptional() @IsNumber() @Min(0) @Max(90) platformFeePercent?: number;
+  // Whether this tenant has its own dedicated portal (still shows in the
+  // global marketplace too — dual presence).
+  @IsOptional() @IsBoolean() hasDedicatedPortal?: boolean;
 }
 
 export class UpdateTenantDto {
@@ -48,6 +58,13 @@ export class UpdateTenantDto {
   @IsOptional() @IsString() @MaxLength(160) supportEmail?: string;
 
   @IsOptional() @IsObject() moduleFlags?: Record<string, boolean>;
+
+  // Platform commission % on this tenant's sales (default 15). Set at
+  // onboarding approval; the owner keeps the remainder.
+  @IsOptional() @IsNumber() @Min(0) @Max(90) platformFeePercent?: number;
+  // Whether this tenant has its own dedicated portal (still shows in the
+  // global marketplace too — dual presence).
+  @IsOptional() @IsBoolean() hasDedicatedPortal?: boolean;
 }
 
 // Constrained public payload for self-serve onboarding from the marketplace.

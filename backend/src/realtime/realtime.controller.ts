@@ -1,5 +1,6 @@
 import {
   Controller,
+  Headers,
   MessageEvent,
   Query,
   Sse,
@@ -9,11 +10,14 @@ import { JwtService } from "@nestjs/jwt";
 import { Observable, interval, map, merge } from "rxjs";
 import { RealtimeService } from "./realtime.service";
 
-// Server-Sent Events endpoint.
-//
-// EventSource (the browser SSE client) cannot send Authorization headers, so we
-// accept the JWT as a query-string token and verify it here. A 25s heartbeat
-// keeps proxies/load balancers from closing the idle connection.
+function cookieValue(raw: string | undefined, name: string): string | null {
+  for (const part of (raw || "").split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
 @Controller("events")
 export class RealtimeController {
   constructor(
@@ -22,11 +26,15 @@ export class RealtimeController {
   ) {}
 
   @Sse()
-  stream(@Query("token") token?: string): Observable<MessageEvent> {
-    if (!token) throw new UnauthorizedException("Missing token");
+  stream(
+    @Query("token") token?: string,
+    @Headers("cookie") cookie?: string,
+  ): Observable<MessageEvent> {
+    const jwtToken = token || cookieValue(cookie, "auth_token");
+    if (!jwtToken) throw new UnauthorizedException("Missing token");
     let userId: string;
     try {
-      const payload = this.jwt.verify(token);
+      const payload = this.jwt.verify(jwtToken) as any;
       userId = payload.sub;
     } catch {
       throw new UnauthorizedException("Invalid token");
@@ -37,7 +45,13 @@ export class RealtimeController {
       .pipe(map((e) => ({ type: e.type, data: e.data }) as MessageEvent));
 
     const heartbeat$ = interval(25000).pipe(
-      map(() => ({ type: "ping", data: JSON.stringify({ t: Date.now() }) }) as MessageEvent),
+      map(
+        () =>
+          ({
+            type: "ping",
+            data: JSON.stringify({ t: Date.now() }),
+          }) as MessageEvent,
+      ),
     );
 
     return merge(events$, heartbeat$);

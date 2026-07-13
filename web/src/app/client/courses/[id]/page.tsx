@@ -678,6 +678,39 @@ export default function CourseDetailPage() {
 }
 
 // ============== Lesson player ==============
+function sanitizeHtml(input: string): string {
+  if (typeof window === "undefined") return input;
+  const template = document.createElement("template");
+  template.innerHTML = input;
+  const blockedTags = new Set([
+    "script",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+  ]);
+  template.content.querySelectorAll("*").forEach((el) => {
+    const tag = el.tagName.toLowerCase();
+    if (blockedTags.has(tag)) {
+      el.remove();
+      return;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value || "";
+      if (name.startsWith("on")) el.removeAttribute(attr.name);
+      if (
+        (name === "href" || name === "src") &&
+        /^javascript:/i.test(value.trim())
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+  return template.innerHTML;
+}
+
 // Renders admin-authored rich text (HTML). Falls back to plain text when the
 // value contains no markup, so the learner never sees raw tags / code.
 function HtmlContent({
@@ -702,7 +735,7 @@ function HtmlContent({
       </p>
     );
   }
-  const dangerous = { __html: value };
+  const dangerous = { __html: sanitizeHtml(value) };
   return (
     <div
       className={clsx("rich-content text-sm text-slate-700", className)}

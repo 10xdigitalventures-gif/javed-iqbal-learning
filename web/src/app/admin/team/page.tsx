@@ -35,6 +35,14 @@ const DEFAULT_AGENT_SCOPES = [
 
 export default function AdminTeam() {
   const [staff, setStaff] = useState<User[]>([]);
+  const [tenants, setTenants] = useState<
+    Array<{ id: string; name: string; brandName?: string }>
+  >([]);
+  const [tenantRoles, setTenantRoles] = useState<
+    Record<string, Array<{ tenantId: string; role: Role }>>
+  >({});
+  const [roleTenant, setRoleTenant] = useState<Record<string, string>>({});
+  const [roleValue, setRoleValue] = useState<Record<string, Role>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,11 +54,35 @@ export default function AdminTeam() {
 
   async function load() {
     try {
-      const [admins, supports] = await Promise.all([
-        api<User[]>("/users?role=ADMIN"),
-        api<User[]>("/users?role=SUPPORT"),
-      ]);
-      setStaff([...(admins || []), ...(supports || [])]);
+      const [admins, supports, consultantAdmins, tenantData] =
+        await Promise.all([
+          api<User[]>("/users?role=ADMIN"),
+          api<User[]>("/users?role=SUPPORT"),
+          api<User[]>("/users?role=TENANT_ADMIN"),
+          api<any>("/tenant"),
+        ]);
+      const people = [
+        ...(admins || []),
+        ...(supports || []),
+        ...(consultantAdmins || []),
+      ];
+      const tenantList = Array.isArray(tenantData)
+        ? tenantData
+        : (tenantData?.tenants ?? []);
+      setStaff(people);
+      setTenants(tenantList);
+      const entries = await Promise.all(
+        people.map(
+          async (u) =>
+            [
+              u.id,
+              await api<Array<{ tenantId: string; role: Role }>>(
+                `/users/${u.id}/tenant-roles`,
+              ).catch(() => []),
+            ] as const,
+        ),
+      );
+      setTenantRoles(Object.fromEntries(entries));
     } catch (e: any) {
       setError(e?.message || "Could not load the team.");
     }
@@ -117,11 +149,49 @@ export default function AdminTeam() {
     }
   }
 
+  async function assignTenantRole(u: User) {
+    const tenantId = roleTenant[u.id] || tenants[0]?.id;
+    const role = roleValue[u.id] || "TENANT_ADMIN";
+    if (!tenantId) return setError("Select a tenant first.");
+    try {
+      setBusy(true);
+      await api(`/users/${u.id}/tenant-roles`, {
+        method: "POST",
+        body: { tenantId, role },
+      });
+      load();
+    } catch (e: any) {
+      setError(e?.message || "Could not assign tenant role.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeTenantRole(u: User, tenantId: string, role: Role) {
+    try {
+      setBusy(true);
+      await api(`/users/${u.id}/tenant-roles/remove`, {
+        method: "POST",
+        body: { tenantId, role },
+      });
+      load();
+    } catch (e: any) {
+      setError(e?.message || "Could not remove tenant role.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function tenantLabel(id: string) {
+    const t = tenants.find((x) => x.id === id);
+    return t?.brandName || t?.name || id;
+  }
+
   return (
     <div>
       <PageHeader
         title="Team & roles"
-        subtitle="Manage admin-portal staff. Support agents share the admin portal but only have the scopes you grant them."
+        subtitle="Manage admin staff, support permissions, and tenant-scoped roles for consultant/admin switching."
       />
       {error ? <ErrorText message={error} /> : null}
 
@@ -231,7 +301,7 @@ export default function AdminTeam() {
                 )}
 
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Role</span>
+                  <span className="text-xs text-slate-400">Base role</span>
                   <Select
                     value={u.role}
                     onChange={(e) => changeRole(u, e.target.value)}
@@ -239,7 +309,72 @@ export default function AdminTeam() {
                   >
                     <option value="SUPPORT">Support agent</option>
                     <option value="ADMIN">Admin</option>
+                    <option value="TENANT_ADMIN">Tenant admin</option>
+                    <option value="CONSULTANT">Consultant</option>
                   </Select>
+                </div>
+
+                <div className="mt-3 rounded-lg bg-slate-50 p-3">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Tenant roles
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(tenantRoles[u.id] || []).length === 0 ? (
+                      <span className="text-xs text-slate-400">
+                        No tenant roles assigned.
+                      </span>
+                    ) : (
+                      (tenantRoles[u.id] || []).map((tr) => (
+                        <button
+                          key={tr.tenantId + tr.role}
+                          disabled={busy}
+                          onClick={() =>
+                            removeTenantRole(u, tr.tenantId, tr.role)
+                          }
+                          className="cursor-pointer rounded-full border border-brand/20 bg-brand/5 px-2.5 py-1 text-xs font-medium text-brand transition duration-200 hover:bg-brand/10"
+                          title="Click to remove"
+                        >
+                          {tenantLabel(tr.tenantId)} ·{" "}
+                          {tr.role.replace("_", " ")}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-[1fr_150px_auto]">
+                    <Select
+                      value={roleTenant[u.id] || tenants[0]?.id || ""}
+                      onChange={(e) =>
+                        setRoleTenant((m) => ({ ...m, [u.id]: e.target.value }))
+                      }
+                      disabled={busy || tenants.length === 0}
+                    >
+                      {tenants.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.brandName || t.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <Select
+                      value={roleValue[u.id] || "TENANT_ADMIN"}
+                      onChange={(e) =>
+                        setRoleValue((m) => ({
+                          ...m,
+                          [u.id]: e.target.value as Role,
+                        }))
+                      }
+                      disabled={busy}
+                    >
+                      <option value="TENANT_ADMIN">Tenant admin</option>
+                      <option value="CONSULTANT">Consultant</option>
+                    </Select>
+                    <Button
+                      size="sm"
+                      onClick={() => assignTenantRole(u)}
+                      disabled={busy || tenants.length === 0}
+                    >
+                      Assign
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))

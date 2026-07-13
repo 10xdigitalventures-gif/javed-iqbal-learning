@@ -330,6 +330,11 @@ export class TenantService {
       // Consultation sub-features
       "packages",
       "meetings",
+      // Direct 1:1 chat/messaging with the consultant. Some tenants get
+      // courses-only and no chat — hence a dedicated toggle.
+      "chat",
+      // Live group/1:1 sessions (webinars / live classes).
+      "live_sessions",
       // Commerce sub-features
       "bundles",
     ];

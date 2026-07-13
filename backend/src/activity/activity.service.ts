@@ -15,7 +15,10 @@ export class ActivityService {
     return this.prisma.activityLog.create({
       data: {
         userId: userId ?? undefined,
+        tenantId: (event.meta as any)?.tenantId ?? undefined,
         action: event.action,
+        entity: (event.meta as any)?.entity ?? null,
+        entityId: (event.meta as any)?.entityId ?? null,
         meta: event.meta
           ? JSON.stringify({
               ...event.meta,
@@ -25,6 +28,36 @@ export class ActivityService {
             ? JSON.stringify({ at: event.at })
             : null,
         ip: ip ?? null,
+      },
+    });
+  }
+
+  async logFull(args: {
+    userId?: string | null;
+    tenantId?: string | null;
+    action: string;
+    entity?: string | null;
+    entityId?: string | null;
+    before?: unknown;
+    after?: unknown;
+    meta?: Record<string, unknown>;
+    ip?: string | null;
+    userAgent?: string | null;
+    requestId?: string | null;
+  }) {
+    return this.prisma.activityLog.create({
+      data: {
+        userId: args.userId ?? undefined,
+        tenantId: args.tenantId ?? undefined,
+        action: args.action,
+        entity: args.entity ?? null,
+        entityId: args.entityId ?? null,
+        before: args.before === undefined ? undefined : (args.before as any),
+        after: args.after === undefined ? undefined : (args.after as any),
+        meta: args.meta ? JSON.stringify(args.meta) : null,
+        ip: args.ip ?? null,
+        userAgent: args.userAgent ?? null,
+        requestId: args.requestId ?? null,
       },
     });
   }
@@ -148,11 +181,17 @@ export class ActivityService {
     q?: string;
     action?: string;
     userId?: string;
+    tenantId?: string;
+    entity?: string;
+    entityId?: string;
     from?: string;
     to?: string;
   }) {
     const where: any = {};
     if (opts.userId) where.userId = opts.userId;
+    if (opts.tenantId) where.tenantId = opts.tenantId;
+    if (opts.entity) where.entity = opts.entity;
+    if (opts.entityId) where.entityId = opts.entityId;
     if (opts.action) {
       where.action = opts.action;
     } else {
@@ -173,6 +212,9 @@ export class ActivityService {
     q?: string;
     action?: string;
     userId?: string;
+    tenantId?: string;
+    entity?: string;
+    entityId?: string;
     from?: string;
     to?: string;
     page?: string | number;
@@ -216,6 +258,9 @@ export class ActivityService {
     q?: string;
     action?: string;
     userId?: string;
+    tenantId?: string;
+    entity?: string;
+    entityId?: string;
     from?: string;
     to?: string;
     limit?: number;
@@ -234,8 +279,15 @@ export class ActivityService {
       "userName",
       "userEmail",
       "role",
+      "tenantId",
       "action",
+      "entity",
+      "entityId",
       "ip",
+      "userAgent",
+      "requestId",
+      "before",
+      "after",
       "meta",
     ];
     const escape = (v: unknown) => {
@@ -248,8 +300,15 @@ export class ActivityService {
         l.user?.name ?? "",
         l.user?.email ?? "",
         l.user?.role ?? "",
+        (l as any).tenantId ?? "",
         l.action,
+        (l as any).entity ?? "",
+        (l as any).entityId ?? "",
         l.ip ?? "",
+        (l as any).userAgent ?? "",
+        (l as any).requestId ?? "",
+        JSON.stringify((l as any).before ?? ""),
+        JSON.stringify((l as any).after ?? ""),
         l.meta ?? "",
       ]
         .map(escape)

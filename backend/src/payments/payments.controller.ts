@@ -4,6 +4,7 @@ import {
   Get,
   Headers,
   Logger,
+  BadRequestException,
   Param,
   Post,
   Query,
@@ -73,10 +74,11 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @Post("checkout/:paymentId")
   checkout(
+    @CurrentUser() user: AuthUser,
     @Param("paymentId") paymentId: string,
     @Body() body: { gateway?: string },
   ) {
-    return this.service.checkout(paymentId, body?.gateway);
+    return this.service.checkout(user.userId, paymentId, body?.gateway);
   }
 
   // Builds the gateway redirect (plain redirect or self-submitting form) and
@@ -192,6 +194,9 @@ export class PaymentsController {
     @Param("paymentId") paymentId: string,
     @Res() res: Response,
   ) {
+    if (process.env.NODE_ENV === "production") {
+      throw new BadRequestException("Mock checkout is disabled in production");
+    }
     await this.service.markPaid(paymentId, "MOCK-" + Date.now());
     const web = process.env.PUBLIC_WEB_URL || "http://localhost:3000";
     return res.redirect(`${web}/payment/success?ref=${paymentId}`);

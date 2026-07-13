@@ -23,8 +23,11 @@ import {
   MessageSquare,
   Package,
   ScrollText,
+  Palette,
   Settings,
   ShieldCheck,
+  Smartphone,
+  SwitchCamera,
   Trophy,
   TrendingUp,
   GitMerge,
@@ -85,6 +88,15 @@ const nav = {
     { href: "/admin/support", label: "Support", icon: Headphones },
     { href: "/admin/inbox", label: "My alerts", icon: Bell },
   ],
+  TENANT_ADMIN: [
+    { href: "/tenant-admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/tenant-admin/branding", label: "Branding", icon: Palette },
+    { href: "/tenant-admin/mobile-app", label: "Mobile App", icon: Smartphone },
+    { href: "/tenant-admin/packages", label: "Packages", icon: Package },
+    { href: "/tenant-admin/courses", label: "Courses", icon: GraduationCap },
+    { href: "/tenant-admin/ebooks", label: "E-Books", icon: BookOpen },
+    { href: "/tenant-admin/revenue", label: "Revenue", icon: TrendingUp },
+  ],
   CONSULTANT: [
     { href: "/consultant", label: "Dashboard", icon: LayoutDashboard },
     { href: "/consultant/clients", label: "Clients", icon: Users },
@@ -129,7 +141,7 @@ export function Shell({
   children: React.ReactNode;
   role: Role | Role[];
 }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, switchRole } = useAuth();
   const branding = useBranding();
   const modules = useModules();
   const router = useRouter();
@@ -161,8 +173,19 @@ export function Shell({
             className="h-9 w-auto"
           />
           <p className="mt-1 text-xs capitalize text-slate-500">
-            {user.role.toLowerCase()} portal
+            {user.role.toLowerCase().replace("_", " ")} portal
           </p>
+          {user.role === "TENANT_ADMIN" || user.role === "CONSULTANT" ? (
+            <Link
+              href={
+                user.role === "TENANT_ADMIN" ? "/consultant" : "/tenant-admin"
+              }
+              className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition duration-200 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            >
+              <SwitchCamera className="h-3.5 w-3.5" aria-hidden="true" />
+              Switch to {user.role === "TENANT_ADMIN" ? "consultant" : "admin"}
+            </Link>
+          ) : null}
         </div>
         <nav
           className="flex-1 space-y-1 overflow-y-auto pb-16"

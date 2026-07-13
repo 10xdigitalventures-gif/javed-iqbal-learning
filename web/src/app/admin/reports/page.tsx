@@ -234,6 +234,7 @@ export default function AdminReportsPage() {
   async function downloadCsv(path: string, filename: string) {
     const token = getToken();
     const res = await fetch(API_BASE + path + query, {
+      credentials: "include",
       headers: token ? { Authorization: "Bearer " + token } : {},
     });
     const blob = await res.blob();

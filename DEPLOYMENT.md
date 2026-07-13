@@ -149,3 +149,39 @@ npm run test:e2e   # covers register → purchase → payment → usage → meet
 ```
 
 Run the suite against a disposable test database in CI before each deploy.
+
+## Marketplace and dedicated tenant portal deployment notes
+
+Deploy three web-facing surfaces:
+
+- API: backend NestJS service.
+- Main app: `web/` for tenant portal/admin/consultant/client surfaces.
+- Marketplace app: `marketplace/` for global discovery and onboarding.
+
+Important environment checks:
+
+- `NEXT_PUBLIC_API_URL` must point each frontend to the live API.
+- `PLATFORM_ROOT_DOMAIN` / `NEXT_PUBLIC_ROOT_DOMAIN` must match the production root domain used for tenant subdomains.
+- Custom domains should point to the frontend and resolve through `Tenant.customDomain`.
+- Run `npx prisma migrate deploy && npx prisma generate` before backend build/start.
+
+Post-deploy smoke tests:
+
+1. Marketplace `/` loads global catalog.
+2. Marketplace `/onboard` works and creates unlisted tenants.
+3. Dedicated tenant domain resolves correct branding and has no onboarding CTA/form.
+4. Main admin can update feature flags, platform fee %, and dedicated portal flag.
+5. Tenant admin sees only own packages/courses/books/revenue.
+6. Audit log and CSV export work from main admin.
+
+## 10. Security verification checklist
+
+Before release, verify these runtime items in the real environment:
+
+- Auth cookie works over HTTPS with `httpOnly`, `secure`, and `sameSite=lax`.
+- API and frontend are on approved origins only; CORS credentials work as expected.
+- Database connection uses TLS/SSL and the DB is not publicly exposed.
+- Reverse proxy/load balancer enforces HTTPS and preserves `X-Forwarded-For`.
+- GHL / third-party sync is configured with `GHL_SYNC_INCLUDE_PHONE=false` and `GHL_SYNC_INCLUDE_NOTES=false` unless explicitly required.
+- Large upload abuse is constrained by `MAX_UPLOAD_BYTES` and any gateway/proxy body-size limits.
+- If Redis-backed rate limiting is required for multi-instance deployment, `REDIS_URL` is configured and verified.

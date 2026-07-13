@@ -20,6 +20,8 @@ const PUBLIC_SELECT = {
   email: true,
   phone: true,
   role: true,
+  tenantId: true,
+  scopes: true,
   isActive: true,
   title: true,
   expertise: true,
@@ -120,6 +122,33 @@ export class UsersService {
       data: { ...dto },
       select: PUBLIC_SELECT,
     });
+  }
+
+  listTenantRoles(userId: string) {
+    return (this.prisma as any).userTenantRole.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async assignTenantRole(userId: string, tenantId: string, role: Role) {
+    await this.get(userId);
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new NotFoundException("Tenant not found");
+    return (this.prisma as any).userTenantRole.upsert({
+      where: { userId_tenantId_role: { userId, tenantId, role } },
+      create: { userId, tenantId, role },
+      update: {},
+    });
+  }
+
+  async removeTenantRole(userId: string, tenantId: string, role: Role) {
+    await (this.prisma as any).userTenantRole.deleteMany({
+      where: { userId, tenantId, role },
+    });
+    return { ok: true };
   }
 
   // Register (or clear) a user's Expo push token for mobile notifications.

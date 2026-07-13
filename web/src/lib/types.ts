@@ -1,10 +1,13 @@
-export type Role = "ADMIN" | "SUPPORT" | "CONSULTANT" | "CLIENT";
+export type Role =
+  "ADMIN" | "SUPPORT" | "TENANT_ADMIN" | "CONSULTANT" | "CLIENT";
 
 export type User = {
   id: string;
   email: string;
   name: string;
   role: Role;
+  tenantId?: string | null;
+  tenantRoles?: Array<{ tenantId: string; role: Role }>;
   phone?: string;
   avatarUrl?: string;
   bio?: string;

@@ -1,8 +1,26 @@
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe } from "@nestjs/common";
+import { Logger, ValidationPipe } from "@nestjs/common";
 import * as express from "express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+
+const logger = new Logger("Bootstrap");
+
+function assertCriticalEnv() {
+  if (process.env.NODE_ENV !== "production") return;
+  const required = [
+    "DATABASE_URL",
+    "JWT_SECRET",
+    "PUBLIC_API_URL",
+    "PUBLIC_WEB_URL",
+  ];
+  const missing = required.filter((key) => !(process.env[key] || "").trim());
+  if (missing.length) {
+    throw new Error(
+      `Missing critical environment variables: ${missing.join(", ")}`,
+    );
+  }
+}
 
 // Build a CORS origin checker. In production we allow:
 //  - PUBLIC_WEB_URL (the primary web app)
@@ -43,11 +61,31 @@ function buildCorsOrigin() {
 }
 
 async function bootstrap() {
+  assertCriticalEnv();
   // rawBody: true exposes req.rawBody so we can verify webhook HMAC signatures
   // (e.g. Whop) over the exact bytes that were signed.
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.setGlobalPrefix("api");
-  app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+      frameguard: { action: "deny" },
+      noSniff: true,
+      hsts:
+        process.env.NODE_ENV === "production"
+          ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+          : false,
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+          formAction: ["'self'"],
+        },
+      },
+    }),
+  );
 
   // In production, restrict CORS to known origins: the primary web app, any
   // subdomain of the platform root domain (tenant storefronts + marketplace),
@@ -76,9 +114,6 @@ async function bootstrap() {
   // unauthenticated enumeration of private client–consultant media.
 
   await app.listen(process.env.PORT || 4000);
-  // eslint-disable-next-line no-console
-  console.log(
-    `API running on http://localhost:${process.env.PORT || 4000}/api`,
-  );
+  logger.log(`API running on port ${process.env.PORT || 4000}`);
 }
 bootstrap();

@@ -93,6 +93,14 @@ export class GhlSyncService implements OnModuleInit {
     return process.env.GHL_SYNC_ENABLED === "true";
   }
 
+  private includePhone() {
+    return process.env.GHL_SYNC_INCLUDE_PHONE === "true";
+  }
+
+  private includeNotes() {
+    return process.env.GHL_SYNC_INCLUDE_NOTES === "true";
+  }
+
   // Run `fn` detached; log (never rethrow) on failure. No-op when disabled.
   private fire(label: string, fn: () => Promise<void>) {
     if (!this.isEnabled()) return;
@@ -104,7 +112,7 @@ export class GhlSyncService implements OnModuleInit {
   // ---- Core: upsert a contact + optional note ----
   private async doSync(payload: ContactSync): Promise<void> {
     const email = payload.email || undefined;
-    const phone = payload.phone || undefined;
+    const phone = this.includePhone() ? payload.phone || undefined : undefined;
     if (!email && !phone) return; // GHL needs at least one identifier
 
     const token = await this.lc.getValidAccessToken();
@@ -146,7 +154,7 @@ export class GhlSyncService implements OnModuleInit {
     const data: any = await res.json().catch(() => ({}));
     const contactId = data?.contact?.id || data?.id;
 
-    if (contactId && payload.note) {
+    if (contactId && payload.note && this.includeNotes()) {
       await fetch(this.lc.apiBaseUrl + "/contacts/" + contactId + "/notes", {
         method: "POST",
         headers: {

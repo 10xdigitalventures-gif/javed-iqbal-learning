@@ -1,20 +1,28 @@
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import type { ExpertCard } from "@/lib/types";
+import type { MarketplaceCatalog } from "@/lib/types";
 import { ExpertGrid } from "@/components/expert-grid";
+import { GlobalCatalog } from "@/components/global-catalog";
 
 export const dynamic = "force-dynamic";
 
-async function getExperts(): Promise<ExpertCard[]> {
+const EMPTY: MarketplaceCatalog = {
+  experts: [],
+  courses: [],
+  books: [],
+  packages: [],
+};
+
+async function getCatalog(): Promise<MarketplaceCatalog> {
   try {
-    return await apiGet<ExpertCard[]>("/tenant/directory");
+    return await apiGet<MarketplaceCatalog>("/marketplace/catalog");
   } catch {
-    return [];
+    return EMPTY;
   }
 }
 
 export default async function HomePage() {
-  const experts = await getExperts();
+  const { experts, courses, books, packages } = await getCatalog();
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
@@ -23,9 +31,11 @@ export default async function HomePage() {
           <p className="text-sm font-semibold text-brand">
             10X Digital Ventures
           </p>
-          <h1 className="text-3xl font-bold tracking-tight">Find an expert</h1>
+          <h1 className="text-3xl font-bold tracking-tight">
+            The 10X Marketplace
+          </h1>
           <p className="mt-1 text-slate-600">
-            Browse consultants and creators building on the 10X platform.
+            Every consultant, course, book and package — all in one place.
           </p>
         </div>
         <Link
@@ -36,7 +46,14 @@ export default async function HomePage() {
         </Link>
       </header>
 
-      <ExpertGrid experts={experts} />
+      <section>
+        <h2 className="mb-4 text-xl font-semibold tracking-tight">
+          Experts
+        </h2>
+        <ExpertGrid experts={experts} />
+      </section>
+
+      <GlobalCatalog courses={courses} books={books} packages={packages} />
     </main>
   );
 }

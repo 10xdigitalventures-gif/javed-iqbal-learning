@@ -68,12 +68,12 @@ export class PurchasesController {
   }
 
   @Get(":id")
-  get(@Param("id") id: string) {
-    return this.service.get(id);
+  get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.getForUser(user, id);
   }
 
   @Patch(":id/cancel")
-  cancel(@Param("id") id: string) {
-    return this.service.cancel(id);
+  cancel(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.cancelForUser(user, id);
   }
 }

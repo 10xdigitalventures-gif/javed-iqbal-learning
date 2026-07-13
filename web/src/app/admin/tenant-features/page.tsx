@@ -28,8 +28,10 @@ const BOOL_GROUPS: {
     title: "Consultation module",
     items: [
       { key: "consultation", label: "Consultation module (master switch)" },
+      { key: "chat", label: "1:1 chat / messaging" },
       { key: "packages", label: "Consultation packages" },
       { key: "meetings", label: "Live meetings / sessions" },
+      { key: "live_sessions", label: "Live sessions / webinars" },
       { key: "subscription", label: "Subscription plans" },
     ],
   },
@@ -59,10 +61,18 @@ const CONSULT_CHANNEL_OPTIONS: { value: string; label: string }[] = [
 
 export default function TenantFeaturesPage() {
   const [tenants, setTenants] = useState<
-    { id: string; name: string; moduleFlags: Flags | null }[]
+    {
+      id: string;
+      name: string;
+      moduleFlags: Flags | null;
+      platformFeePercent?: number;
+      hasDedicatedPortal?: boolean;
+    }[]
   >([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [flags, setFlags] = useState<Flags>({});
+  const [feePct, setFeePct] = useState<number>(15);
+  const [dedicated, setDedicated] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -76,6 +86,12 @@ export default function TenantFeaturesPage() {
         if (list.length > 0) {
           setSelected(list[0].id);
           setFlags(normalise(list[0].moduleFlags));
+          setFeePct(
+            typeof list[0].platformFeePercent === "number"
+              ? list[0].platformFeePercent
+              : 15,
+          );
+          setDedicated(Boolean(list[0].hasDedicatedPortal));
         }
       })
       .catch((e) => setError(e.message))
@@ -96,6 +112,8 @@ export default function TenantFeaturesPage() {
       "subscription",
       "packages",
       "meetings",
+      "chat",
+      "live_sessions",
       "bundles",
     ];
     const out: Flags = {};
@@ -110,6 +128,8 @@ export default function TenantFeaturesPage() {
     if (!t) return;
     setSelected(id);
     setFlags(normalise(t.moduleFlags));
+    setFeePct(typeof t.platformFeePercent === "number" ? t.platformFeePercent : 15);
+    setDedicated(Boolean(t.hasDedicatedPortal));
     setError(null);
     setInfo(null);
   }
@@ -130,12 +150,25 @@ export default function TenantFeaturesPage() {
     try {
       await api(`/tenant/${selected}`, {
         method: "PATCH",
-        body: { moduleFlags: flags },
+        body: {
+          moduleFlags: flags,
+          platformFeePercent: feePct,
+          hasDedicatedPortal: dedicated,
+        },
       });
       setInfo("Feature settings saved.");
       // refresh local cache
       setTenants((prev) =>
-        prev.map((t) => (t.id === selected ? { ...t, moduleFlags: flags } : t)),
+        prev.map((t) =>
+          t.id === selected
+            ? {
+                ...t,
+                moduleFlags: flags,
+                platformFeePercent: feePct,
+                hasDedicatedPortal: dedicated,
+              }
+            : t,
+        ),
       );
     } catch (e: any) {
       setError(e.message);
@@ -281,6 +314,51 @@ export default function TenantFeaturesPage() {
           </div>
         </Card>
       )}
+
+      {/* Commercial + dedicated portal (set at onboarding approval) */}
+      <Card className="p-5">
+        <h2 className="mb-1 font-bold text-slate-900">Commercial & portal</h2>
+        <p className="mb-4 text-xs text-slate-500">
+          Set the platform commission for this consultant (minimum 15%). The
+          owner keeps the remainder of every sale. Enable a dedicated portal to
+          give them their own branded frontend — they still appear in the global
+          marketplace too.
+        </p>
+        <div className="flex flex-wrap items-end gap-6">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-slate-700">
+              Platform commission (%)
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={90}
+              value={feePct}
+              onChange={(e) => setFeePct(Number(e.target.value))}
+              className="w-32 rounded-lg border border-slate-200 px-3 py-2"
+            />
+          </label>
+          <label className="flex cursor-pointer items-center gap-3 py-2">
+            <div
+              onClick={() => setDedicated((v) => !v)}
+              className={
+                "relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors " +
+                (dedicated ? "bg-brand" : "bg-slate-200")
+              }
+            >
+              <span
+                className={
+                  "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform mt-0.5 " +
+                  (dedicated ? "translate-x-5" : "translate-x-0.5")
+                }
+              />
+            </div>
+            <span className="text-sm font-medium text-slate-800">
+              Has dedicated portal
+            </span>
+          </label>
+        </div>
+      </Card>
 
       {error && <ErrorText message={error} />}
       {info && <p className="text-sm font-medium text-green-600">{info}</p>}

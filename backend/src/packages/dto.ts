@@ -10,6 +10,7 @@ import {
 import { ConsultationMode, PackageChannel, PackageType } from "@prisma/client";
 
 export class CreatePackageDto {
+  @IsOptional() @IsString() tenantId?: string;
   @IsString()
   name: string;
 

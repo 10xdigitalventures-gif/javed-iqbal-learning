@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RealtimeModule } from "./realtime/realtime.module";
@@ -32,9 +32,12 @@ import { LeadConnectorModule } from "./leadconnector/leadconnector.module";
 import { GhlSyncModule } from "./ghl-sync/ghl-sync.module";
 import { AttributionModule } from "./attribution/attribution.module";
 import { ReconciliationModule } from "./reconciliation/reconciliation.module";
+import { MarketplaceModule } from "./marketplace/marketplace.module";
+import { PayoutsModule } from "./payouts/payouts.module";
 import { TenantModule } from "./tenant/tenant.module";
 import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
 import { AppController } from "./app.controller";
+import { AuditInterceptor } from "./activity/audit.interceptor";
 
 @Module({
   imports: [
@@ -74,11 +77,16 @@ import { AppController } from "./app.controller";
     GhlSyncModule,
     AttributionModule,
     ReconciliationModule,
+    MarketplaceModule,
+    PayoutsModule,
     AiModule,
     GamificationModule,
   ],
   controllers: [AppController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

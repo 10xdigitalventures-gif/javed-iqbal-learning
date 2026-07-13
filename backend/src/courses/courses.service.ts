@@ -99,8 +99,10 @@ export class CoursesService {
     pageSize?: string | number;
     sort?: string;
     order?: string;
+    tenantId?: string;
   }): Promise<Paginated<any>> {
     const where: any = {};
+    if (opts.tenantId) where.tenantId = opts.tenantId;
     if (opts.status === "published") where.isPublished = true;
     if (opts.status === "draft") where.isPublished = false;
     const search = searchOr(opts.q, ["title", "description", "slug"]);
@@ -489,6 +491,7 @@ export class CoursesService {
   async create(dto: CreateCourseDto) {
     return this.prisma.course.create({
       data: {
+        tenantId: (dto as any).tenantId,
         title: dto.title,
         slug: await this.uniqueSlug(dto.slug || dto.title),
         description: dto.description ?? null,
@@ -743,6 +746,7 @@ export class CoursesService {
     return this.prisma.quiz.update({
       where: { id },
       data: {
+        tenantId: (dto as any).tenantId,
         title: dto.title,
         passScore: dto.passScore,
         timeLimitSec: dto.timeLimitSec,

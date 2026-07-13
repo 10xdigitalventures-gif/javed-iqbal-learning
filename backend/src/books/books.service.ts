@@ -194,8 +194,10 @@ export class BooksService {
     pageSize?: string | number;
     sort?: string;
     order?: string;
+    tenantId?: string;
   }): Promise<Paginated<any>> {
     const where: any = {};
+    if (opts.tenantId) where.tenantId = opts.tenantId;
     if (opts.status === "published") where.isPublished = true;
     if (opts.status === "draft") where.isPublished = false;
     if (opts.categoryId) where.categoryId = opts.categoryId;
@@ -272,6 +274,7 @@ export class BooksService {
   async createBook(dto: CreateBookDto) {
     return this.prisma.book.create({
       data: {
+        tenantId: (dto as any).tenantId,
         title: dto.title,
         slug: await this.uniqueSlug(dto.slug || dto.title, "book"),
         author: dto.author ?? "Prof. Dr. Javed Iqbal",
@@ -806,6 +809,7 @@ export class BooksService {
   async createBundle(dto: CreateBundleDto) {
     const bundle = await this.prisma.bundle.create({
       data: {
+        tenantId: (dto as any).tenantId,
         title: dto.title,
         slug: await this.uniqueSlug(dto.slug || dto.title, "bundle"),
         description: dto.description ?? null,
