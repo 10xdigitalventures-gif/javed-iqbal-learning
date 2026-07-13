@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, clearToken } from "./api";
+import { api, clearToken, setToken } from "./api";
 import type { User } from "./types";
 
 type AuthState = {
@@ -58,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       method: "POST",
       body: { email, password },
     });
+    setToken(res.token);
     localStorage.removeItem("activeRole");
     setEffectiveRole(res.user.role);
     setUser(res.user);

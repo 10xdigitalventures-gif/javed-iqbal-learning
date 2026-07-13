@@ -9,9 +9,10 @@ import { BankTransferProvider } from "./providers/bank-transfer.provider";
 import { PurchasesModule } from "../purchases/purchases.module";
 import { OrdersModule } from "../orders/orders.module";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { PayoutsModule } from "../payouts/payouts.module";
 
 @Module({
-  imports: [PurchasesModule, OrdersModule, NotificationsModule],
+  imports: [PurchasesModule, OrdersModule, NotificationsModule, PayoutsModule],
   providers: [
     PaymentsService,
     PaymentProvidersService,

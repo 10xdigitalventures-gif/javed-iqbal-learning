@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, setToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button, Card, ErrorText, Input } from "@/components/ui";
 
@@ -28,10 +28,11 @@ export default function RegisterPage() {
     setError(null);
     setBusy(true);
     try {
-      await api<{ token: string }>("/auth/register", {
+      const res = await api<{ token: string }>("/auth/register", {
         method: "POST",
         body: form,
       });
+      setToken(res.token);
       await refresh();
       router.replace("/client");
     } catch (err: any) {
