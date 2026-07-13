@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, ErrorText, Input, Select } from "@/components/ui";
 import { PageHeader } from "@/components/shell";
-import type { User } from "@/lib/types";
+import type { Role, User } from "@/lib/types";
 
 // Must mirror backend src/common/scopes.ts
 const SCOPES: { key: string; label: string; hint: string }[] = [

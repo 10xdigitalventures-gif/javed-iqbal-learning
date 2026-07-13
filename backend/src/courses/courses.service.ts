@@ -746,7 +746,6 @@ export class CoursesService {
     return this.prisma.quiz.update({
       where: { id },
       data: {
-        tenantId: (dto as any).tenantId,
         title: dto.title,
         passScore: dto.passScore,
         timeLimitSec: dto.timeLimitSec,

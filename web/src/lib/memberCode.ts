@@ -7,6 +7,7 @@ import type { Role } from "./types";
 const PREFIX: Record<Role, string> = {
   ADMIN: "ADM",
   SUPPORT: "SUP",
+  TENANT_ADMIN: "TEN",
   CONSULTANT: "CON",
   CLIENT: "CLT",
 };

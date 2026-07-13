@@ -65,7 +65,7 @@ const FAQS = [
 
 export default function BookAChatPage() {
   const branding = useBranding();
-  const brand = branding.brandName || "10X Digital Ventures";
+  const brand = branding?.brandName || "10X Digital Ventures";
 
   return (
     <main className="min-h-screen bg-white">

@@ -179,9 +179,9 @@ export class PaymentsService {
     } catch {
       // attribution must never block payment confirmation
     }
-    // Revenue split — record the owner's payout + platform fee (Phase 5).
-    // Best-effort: never block payment confirmation.
-    await this.payouts.recordForPayment(payment.id);
+    // Revenue split (owner payout + platform fee) is recorded when the
+    // purchase/order is activated in PurchasesService.activate /
+    // OrdersService.fulfill, so nothing extra is needed here.
     return updated;
   }
 

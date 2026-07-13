@@ -360,6 +360,22 @@ export class BooksService {
     });
   }
 
+  // Partial update of a single chapter by id. Only touches fields the caller
+  // actually sends so audio/content saves never wipe other chapter fields.
+  async updateChapter(id: string, dto: any) {
+    const data: any = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.contentKey !== undefined) data.contentKey = dto.contentKey ?? null;
+    if (dto.pageStart !== undefined) data.pageStart = dto.pageStart ?? null;
+    if (dto.pageEnd !== undefined) data.pageEnd = dto.pageEnd ?? null;
+    if (dto.titleUrdu !== undefined) data.titleUrdu = dto.titleUrdu || null;
+    if (dto.contentKeyUrdu !== undefined)
+      data.contentKeyUrdu = dto.contentKeyUrdu || null;
+    if (dto.isFree !== undefined) data.isFree = dto.isFree;
+    if (dto.index !== undefined) data.index = dto.index;
+    return this.prisma.chapter.update({ where: { id }, data });
+  }
+
   async deleteChapter(id: string) {
     await this.prisma.chapter.delete({ where: { id } });
     return { ok: true };

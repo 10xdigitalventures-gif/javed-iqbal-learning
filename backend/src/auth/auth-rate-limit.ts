@@ -1,4 +1,4 @@
-import { TooManyRequestsException } from "@nestjs/common";
+import { HttpException, HttpStatus } from "@nestjs/common";
 
 type Entry = { count: number; resetAt: number };
 
@@ -20,8 +20,9 @@ export function enforceAuthRateLimit(
     return;
   }
   if (current.count >= safeLimit) {
-    throw new TooManyRequestsException(
+    throw new HttpException(
       "Too many attempts. Please wait and try again.",
+      HttpStatus.TOO_MANY_REQUESTS,
     );
   }
   current.count += 1;

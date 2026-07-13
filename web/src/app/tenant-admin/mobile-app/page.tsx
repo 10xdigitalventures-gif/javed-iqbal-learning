@@ -44,14 +44,14 @@ export default function TenantMobileAppPage() {
 
   const env = useMemo(() => {
     if (!branding) return "";
-    const appSlug = slugify(appName || branding.slug);
+    const appSlug = slugify(appName || branding?.slug || "app");
     return [
-      `EXPO_PUBLIC_APP_NAME=${appName || branding.brandName}`,
+      `EXPO_PUBLIC_APP_NAME=${appName || branding?.brandName || ""}`,
       `EXPO_PUBLIC_APP_SLUG=${appSlug}`,
       `EXPO_PUBLIC_BUNDLE_ID=${bundleId}`,
       `EXPO_PUBLIC_ANDROID_PKG=${androidPkg}`,
-      `EXPO_PUBLIC_TENANT_SLUG=${branding.slug}`,
-      `EXPO_PUBLIC_BRAND_COLOR=${branding.primaryColor || "#2783DE"}`,
+      `EXPO_PUBLIC_TENANT_SLUG=${branding?.slug || ""}`,
+      `EXPO_PUBLIC_BRAND_COLOR=${branding?.primaryColor || "#2783DE"}`,
       iconUrl ? `WHITE_LABEL_ICON_URL=${iconUrl}` : "",
       splashUrl ? `WHITE_LABEL_SPLASH_URL=${splashUrl}` : "",
     ]
